@@ -1,0 +1,87 @@
+# --- General ---
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE configuration files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Python ---
+# Virtual environments
+venv/
+env/
+*/venv/
+*/env/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Node / Vue ---
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Build artifacts
+dist
+.output
+dist-ssr
+
+# Dependencies
+node_modules/
+
+# --- Sensitive Information (VERY IMPORTANT) ---
+# Environment variables files
+.env
+.env.*.local
+.env.local
+
+# Credentials & Keys
+*.pem
+*.key
+credentials.json
+secrets.yml
+
+# --- Project-Specific Data ---
+# Vector database generated files (can be very large)
+data/vector_store/
+# Do not commit large raw documents to the repo
+data/raw_documents/
