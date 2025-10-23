@@ -1,6 +1,7 @@
 # backend/app/config.py
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # 加载 .env 文件中的环境变量
@@ -24,10 +25,21 @@ EMBEDDING_DIMENSION = 1024  # 默认使用1024维，性能和存储的平衡
 EMBEDDING_BATCH_SIZE = 10  # text-embedding-v4的批次大小上限为10
 EMBEDDING_MAX_TOKENS = 8192  # 单次最大处理Token数
 
+# --- 路径根定位（确保无论从哪里启动进程，路径都稳定） ---
+_THIS_FILE = Path(__file__).resolve()
+# 目录层级：.../project-RAG-LLM/backend/app/config.py
+# parents[0]=app, [1]=backend, [2]=project-RAG-LLM
+PROJECT_ROOT = _THIS_FILE.parents[2]
+
 # --- 向量数据库配置 ---
 VECTOR_STORE_TYPE = "chroma"  # 使用ChromaDB
-VECTOR_STORE_PATH = "./data/vector_store"  # 持久化存储路径
+# 支持环境变量 VECTOR_STORE_PATH；默认定位到项目 data/vector_store（绝对路径）
+VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT / "data" / "vector_store"))
 VECTOR_COLLECTION_NAME = "course_documents"  # 集合名称
+
+# --- 文档来源目录（新增，可通过环境变量 RAW_DOCUMENTS_PATH 覆盖） ---
+# 默认定位到项目 data/raw_documents（绝对路径）
+RAW_DOCUMENTS_PATH = os.getenv("RAW_DOCUMENTS_PATH", str(PROJECT_ROOT / "data" / "raw_documents"))
 
 # --- 文档处理配置 ---
 CHUNK_SIZE = 500  # 文本块大小(字符数)

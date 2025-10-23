@@ -5,6 +5,7 @@
 负责加载、解析和切分各种格式的文档(TXT, MD, PDF, DOCX, PPTX)
 """
 
+import hashlib
 import os
 import logging
 from typing import List, Dict, Any
@@ -32,6 +33,7 @@ except ImportError:
 
 from .. import config
 from .embedding_service import EmbeddingService
+from ..utils.file_utils import calculate_file_md5
 
 
 class DocumentService:
@@ -45,7 +47,8 @@ class DocumentService:
         '.txt': TextLoader,
         '.md': TextLoader,
         '.pdf': PyPDFLoader,
-        '.docx': UnstructuredWordDocumentLoader
+        '.docx': UnstructuredWordDocumentLoader,
+        '.doc': UnstructuredWordDocumentLoader,
     }
     
     # 如果PPTX支持可用,添加到支持列表
@@ -62,6 +65,7 @@ class DocumentService:
         )
         self.embedding_service = EmbeddingService.get_instance()
         logger.info(f"文档服务初始化成功 - chunk_size: {config.CHUNK_SIZE}, overlap: {config.CHUNK_OVERLAP}")
+    
     
     def is_supported_format(self, file_path: str) -> bool:
         """
@@ -125,7 +129,6 @@ class DocumentService:
             logger.error(f"文档加载失败: {file_path} - {e}")
             raise
     
-
     def split_documents(self, documents: List[Any]) -> List[Dict[str, Any]]:
         """
         切分文档为文本块
@@ -212,7 +215,7 @@ class DocumentService:
             file_path: 文件路径
             
         Returns:
-            完整处理后的文档块列表(包含向量)
+            完整处理后的文档块列表(包含向量和file_md5)
             
         Raises:
             Exception: 处理过程中的任何错误
@@ -221,13 +224,21 @@ class DocumentService:
         logger.info(f"开始处理文档: {file_path}")
         
         try:
+            # 0. 计算文件MD5
+            file_md5 = calculate_file_md5(file_path)
+            logger.info(f"文件MD5: {file_md5}")
+            
             # 1. 加载文档
             documents = self.load_document(file_path)
             
             # 2. 切分文档
             chunks = self.split_documents(documents)
             
-            # 3. 向量化
+            # 3. 为每个chunk添加file_md5
+            for chunk in chunks:
+                chunk['metadata']['file_md5'] = file_md5
+            
+            # 4. 向量化
             vectorized_chunks = self.vectorize_chunks(chunks)
             
             logger.info(f"文档处理完成 - 最终块数: {len(vectorized_chunks)}")
@@ -307,110 +318,3 @@ class DocumentService:
         }
 
 
-# --- 测试代码 ---
-if __name__ == "__main__":
-    print("=" * 60)
-    print("测试文档处理服务")
-    print("=" * 60)
-    
-    # 创建测试文件
-    import tempfile
-    
-    # 创建临时目录
-    test_dir = tempfile.mkdtemp()
-    print(f"\n创建临时测试目录: {test_dir}")
-    
-    # 1. 创建测试TXT文件
-    txt_file = os.path.join(test_dir, "test.txt")
-    with open(txt_file, 'w', encoding='utf-8') as f:
-        f.write("""什么是RAG技术？
-
-RAG(Retrieval-Augmented Generation)是检索增强生成技术。它结合了信息检索和文本生成两个关键组件。
-
-RAG的工作原理如下：
-1. 首先从知识库中检索相关文档
-2. 然后将检索结果作为上下文
-3. 最后由LLM基于上下文生成答案
-
-RAG的优势包括：
-- 减少模型幻觉
-- 提供可追溯的来源
-- 支持知识实时更新
-- 不需要重新训练模型
-
-这使得RAG成为构建企业级AI应用的理想选择。""")
-    
-    # 2. 创建测试MD文件
-    md_file = os.path.join(test_dir, "test.md")
-    with open(md_file, 'w', encoding='utf-8') as f:
-        f.write("""# LangChain简介
-
-## 什么是LangChain
-
-LangChain是一个用于开发由语言模型驱动的应用程序的框架。
-
-## 核心组件
-
-- **Models**: 语言模型接口
-- **Prompts**: 提示词模板
-- **Chains**: 组合多个组件
-- **Memory**: 对话记忆管理
-
-## 使用场景
-
-LangChain特别适合构建：
-1. 问答系统
-2. 聊天机器人
-3. 文档分析工具
-4. 代码生成助手
-""")
-    
-    try:
-        # 初始化服务
-        print("\n[1] 初始化文档服务...")
-        service = DocumentService()
-        print("✓ 服务初始化成功")
-        
-        # 测试TXT文件处理
-        print("\n[2] 测试TXT文件处理...")
-        txt_chunks = service.process_document(txt_file)
-        print(f"✓ TXT文件处理成功")
-        print(f"  文件: {txt_file}")
-        print(f"  切分块数: {len(txt_chunks)}")
-        print(f"  第一块内容: {txt_chunks[0]['content'][:50]}...")
-        print(f"  向量维度: {len(txt_chunks[0]['embedding'])}")
-        
-        # 测试MD文件处理
-        print("\n[3] 测试MD文件处理...")
-        md_chunks = service.process_document(md_file)
-        print(f"✓ MD文件处理成功")
-        print(f"  文件: {md_file}")
-        print(f"  切分块数: {len(md_chunks)}")
-        
-        # 测试批量处理
-        print("\n[4] 测试批量处理目录...")
-        all_chunks = service.process_directory(test_dir, recursive=False)
-        print(f"✓ 目录批量处理成功")
-        print(f"  总块数: {len(all_chunks)}")
-        
-        # 获取统计信息
-        print("\n[5] 获取统计信息...")
-        stats = service.get_document_stats(all_chunks)
-        print(f"✓ 统计信息:")
-        for key, value in stats.items():
-            print(f"  {key}: {value}")
-        
-        print("\n" + "=" * 60)
-        print("✓ 所有测试通过!")
-        print("=" * 60)
-        
-    except Exception as e:
-        print(f"\n✗ 测试失败: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    finally:
-        # 清理临时文件
-        import shutil
-        shutil.rmtree(test_dir)
-        print(f"\n已清理临时目录: {test_dir}")

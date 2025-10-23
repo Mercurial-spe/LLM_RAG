@@ -2,144 +2,127 @@
 
 # RAG-LLM 智能问答系统
 
-本项目是一个基于检索增强生成（Retrieval-Augmented Generation, RAG）架构的智能问答系统。旨在以特定课程资料为知识库，为用户提供精准、基于事实的回答。项目采用前后端分离架构，前端使用 Vue 构建用户交互界面，后端使用 Python (Flask) 提供 API 服务，并通过 API-KEY 的方式调用大语言模型（LLM）。
+本项目基于 RAG（Retrieval-Augmented Generation）思想，采用前后端分离架构：后端为 Python 代码库（Flask 预留，当前以服务类和脚本为主），前端预留 Vue 目录。当前阶段已完成文档加载/切分、嵌入（向量化）、向量库仓库与入库编排等基础能力。
 
-## 📁 文件目录结构
+## 📁 实际项目结构（已对齐当前代码）
 
 ```plaintext
-Project-RAG-LLM/
-├── backend/                  # 后端服务 (Python, Flask)
-│   ├── app/                  # Flask 应用核心代码
-│   │   ├── __init__.py       # 应用工厂
-│   │   ├── api/              # API 路由/视图
-│   │   │   ├── chat.py       # 处理聊天问答 API
-│   │   │   └── document.py   # 处理文件上传 API
-│   │   ├── core/             # 核心业务逻辑
-│   │   │   ├── rag_pipeline.py # RAG 核心管道
-│   │   │   └── llm_handler.py  # LLM API 封装
-│   │   ├── services/         # 服务层 (原子化功能)
-│   │   │   ├── document_service.py # 文档处理服务
-│   │   │   └── vector_store_service.py # 向量数据库服务
-│   │   ├── config.py         # 配置文件
-│   │   └── models.py         # Pydantic 数据模型
-│   ├── tests/                # 测试用例
-│   ├── run.py                # 启动 Flask 应用的入口
-│   └── requirements.txt      # Python 依赖
-├── frontend/                 # 前端服务 (Vue)
-│   └── ...
-├── data/                     # 数据与知识库
-│   ├── raw_documents/        # 原始课程资料 (PDF等)
-├── scripts/                  # 辅助脚本
-│   └── ingest_data.py        # 离线数据预处理和入库脚本
-├── .gitignore                # Git 忽略配置
-└── README.md                 # 项目说明文档
+project-RAG-LLM/
+├── backend/                         # 后端（Python）
+│   ├── .env_example                 # 环境变量示例（MODELSCOPE_API_KEY, DASHSCOPE_API_KEY）
+│   ├── requirements.txt             # 后端依赖
+│   ├── run.py                       # 临时入口（演示调用 LLM 流式输出）
+│   └── app/
+│       ├── __init__.py              # 占位（后续用于 Flask 应用工厂）
+│       ├── config.py                # 配置：嵌入模型、向量库、切分参数等
+│       ├── models.py                # 占位（后续用于请求/响应模型）
+│       ├── api/                     # API 层（当前占位）
+│       │   ├── __init__.py
+│       │   ├── chat.py              # 预留 /api/chat（暂空）
+│       │   └── document.py          # 预留 /api/document（暂空）
+│       ├── core/                    # 核心逻辑
+│       │   ├── llm_handler.py       # LLM 调用封装（基于 ModelScope 兼容 OpenAI SDK）
+│       │   └── rag__pipeline.py     # RAG 主流程（占位，尚未实现）
+│       ├── services/                # 服务层（已实现）
+│       │   ├── document_service.py      # 文档加载/切分与向量化编排
+│       │   ├── embedding_service.py     # 嵌入服务（DashScope text-embedding-v4）
+│       │   ├── ingestion_service.py     # 入库编排（增量对比、分批写入）
+│       │   └── vector_store_repository.py # 向量库仓库（ChromaDB 数据访问层）
+│       ├── tests/                   # 后端测试脚本（可直接运行）
+│       │   ├── test_document_service.py
+│       │   ├── test_load_only.py
+│       │   ├── test_simple.py
+│       │   └── test_ingestion_flow.py   # 占位
+│       └── utils/
+│           └── file_utils.py        # 通用文件工具（MD5 等）
+├── data/
+│   ├── raw_documents/               # 原始文档（txt/md/pdf/docx 等）
+│   └── vector_store/                # 向量库持久化目录（ChromaDB）
+├── scripts/
+│   └── ingest_data.py               # 入库脚本（已实现，支持命令行与配置文件）
+└── frontend/                        # 前端占位（便于 Git 识别目录）
 ```
 
-## ⚙️ 核心业务逻辑
+提示：当前 API 与 RAG 主链路尚未落地，可先使用 tests 与 services 验证加载、切分与向量化流程；向量库已具备仓库与入库编排能力。
 
-项目主要包含三种核心的业务流程：
+## ⚙️ 当前已实现的核心能力
 
-### 1\. 离线知识库构建
+- **完整入库系统**（从零构建）
+  - 文档处理（`services/document_service.py`）：支持 TXT/MD（UTF-8）、PDF、DOCX/DOC、PPTX（可选）
+  - 嵌入服务（`services/embedding_service.py`）：阿里云百炼 `text-embedding-v4`，单例模式，支持批量处理
+  - 向量库仓库（`services/vector_store_repository.py`）：ChromaDB 数据访问层，原子操作设计
+  - 入库编排（`services/ingestion_service.py`）：增量更新、MD5去重、分批入库
+  - 入库脚本（`scripts/ingest_data.py`）：命令行工具，支持配置化目录扫描
 
-此流程用于在项目启动前，将所有静态的课程资料构建成可供检索的向量数据库。
+- **核心特性**
+  - 统一块结构：`{"content": str, "metadata": {source, chunk_id, file_md5, ...}, "embedding": [...]}`
+  - 增量更新：基于文件MD5比对，只处理新增/变更文件
+  - 批量优化：文本切分（`RecursiveCharacterTextSplitter`）、嵌入批处理（batch=10）、向量库分批写入
+  - 完整测试：端到端入库测试（`test_ingestion_flow.py`）、相似度检索测试（`test_similarity_search.py`）
 
-1.  **触发**：开发者在服务器上运行命令 `python scripts/ingest_data.py`。
-2.  **`ingest_data.py`** 脚本开始执行，它会遍历 `data/raw_documents/` 目录下的所有文件。
-3.  对于每个文件，脚本会调用 **`services/document_service.py`** 中的函数。该服务负责将文件（如PDF）加载、解析并切分成小的文本块（Chunks）。
-4.  脚本收集所有文本块，调用嵌入模型（Embedding Model）将它们批量转换为向量。
-5.  最后，脚本调用 **`services/vector_store_service.py`** 中的函数，将所有文本块和它们对应的向量存入 `data/vector_store/` 中的数据库。
-6.  流程结束，一个可供查询的知识库构建完成。
+## 🧭 规划中的能力（占位/未完成功能）
 
-### 2\. 用户实时问答 (Chat)
+- **RAG 查询流程**（`core/rag__pipeline.py`）：Query→向量检索→上下文组装→LLM生成→答案+引用
+- **API 服务层**（`app/api/chat.py`、`app/api/document.py`）：HTTP接口，对接前端交互
+- **LLM 集成优化**（`core/llm_handler.py`）：流式输出、错误处理、多模型支持
 
-当用户在前端界面提出问题时，系统执行此流程。
+## � 配置与环境
 
-1.  **触发**：前端向后端的 `/api/chat` 接口发送一个包含用户问题的 POST 请求。
-2.  **`api/chat.py`** 接收到请求，验证数据格式后，调用核心处理管道 **`core/rag_pipeline.py`**。
-3.  **`rag_pipeline.py`** 开始执行 RAG 流程：
-    a. 将用户问题转换为查询向量。
-    b. 调用 **`services/vector_store_service.py`**，在向量数据库中检索最相关的上下文文本块。
-    c. 构建一个包含“上下文”和“用户问题”的 Prompt。
-    d. 调用 **`core/llm_handler.py`**，将构建好的 Prompt 发送给大语言模型（LLM）。
-4.  **`llm_handler.py`** 接收到 LLM 返回的纯文本答案。
-5.  结果逐层返回到 **`api/chat.py`**，它会将最终答案和引用来源打包成 JSON 格式，通过 HTTP 响应回传给前端。
+- 在 `backend/.env` 配置：
+  - `MODELSCOPE_API_KEY=...`
+  - `DASHSCOPE_API_KEY=...`
+- 关键配置项（见 `backend/app/config.py`）：
+  - 嵌入：`EMBEDDING_API_BASE_URL`、`EMBEDDING_MODEL_NAME=text-embedding-v4`、`EMBEDDING_DIMENSION=1024`、`EMBEDDING_BATCH_SIZE=10`
+  - 向量库：`VECTOR_STORE_PATH`（默认项目绝对路径，支持环境变量覆盖）、`VECTOR_COLLECTION_NAME=course_documents`
+  - 文档目录：`RAW_DOCUMENTS_PATH`（默认项目绝对路径，支持环境变量覆盖）
+  - 切分：`CHUNK_SIZE=500`、`CHUNK_OVERLAP=50`
 
-### 3\. 用户上传新文件
+### 路径配置增强
 
-此流程允许用户动态地向知识库中添加新的文档。
+- **稳定路径**：`VECTOR_STORE_PATH` 和 `RAW_DOCUMENTS_PATH` 现在使用基于项目根的绝对路径，无论从哪里启动进程都保持一致
+- **环境变量覆盖**：可通过 `.env` 文件或系统环境变量自定义路径：
 
-1.  **触发**：用户在前端界面上传一个新文件（如PDF），前端将文件发送到 `/api/document` 接口。
-2.  **`api/document.py`** 接收到文件。
-3.  它调用 **`services/document_service.py`**，将这个新文件解析并切分成文本块。
-4.  接着，它调用嵌入模型将这些新的文本块转换为向量。
-5.  最后，它调用 **`services/vector_store_service.py`**，将这些新的文本块和向量**添加**到现有的向量数据库中。
-6.  流程结束，知识库被实时更新。
+  ```bash
+  # .env 文件示例
+  VECTOR_STORE_PATH=/path/to/custom/vector_store
+  RAW_DOCUMENTS_PATH=/path/to/custom/documents
+  ```
 
------
+## ▶️ 快速验证（本地，PowerShell）
 
-## 📄 重点文件深度解析
+以下脚本均可直接运行验证入库系统：
 
-以下文件是项目架构的核心，理解它们的职责是理解整个项目的关键。
+- **完整入库流程测试**（单文件处理）
+  - 运行：`python project-RAG-LLM/backend/tests/test_ingestion_flow.py`
+  - 功能：加载→切分→向量化→入库→验证
 
-### `core/llm_handler.py` (LLM 处理器)
+- **相似度检索测试**（依赖上述入库结果）
+  - 运行：`python project-RAG-LLM/backend/tests/test_similarity_search.py`  
+  - 功能：问题向量化→相似检索→结果展示
 
-这个文件是项目与外部大语言模型（LLM）API之间的**唯一**接口，扮演着“采购员”或“翻译官”的角色。
+- **生产入库脚本**（目录批量处理）
+  - 运行：`python project-RAG-LLM/scripts/ingest_data.py`
+  - 功能：扫描默认目录→增量入库→健康检查
 
-  * **这个文件只关注**：如何根据配置（API-Key, Endpoint）调用一个具体的大模型 API，并处理其特定的请求格式和响应格式。
-  * **输入**：一个已经由 `rag_pipeline` 精心构建好的、可以直接发给模型的 Prompt 字符串。
-  * **输出**：一个从 LLM 返回的、纯净的答案字符串。
+- **其他验证脚本**
+  - 仅文档解析：`python project-RAG-LLM/backend/tests/test_load_only.py`
+  - LLM调用演示：`python project-RAG-LLM/backend/run.py`
 
-### `core/rag_pipeline.py` (RAG 核心管道)
+注意：若在 Windows 上遇到 OpenAI SDK 平台信息采集导致的偶发阻塞，可尝试升级/降级 `openai` 版本或增加重试与超时；`.doc` 解析依赖 LibreOffice（`soffice`），未安装时请先转为 `.docx` 再处理。
 
-这个文件是项目业务逻辑的**总指挥**，负责编排整个 RAG 流程。它就像一个“总工程师”。
+## 🧩 架构设计（已实现部分）
 
-  * **这个文件只关注**：接收用户问题后，如何一步步地执行“检索 -\> 增强 -\> 生成”的完整流程。它决定了应该先做什么、后做什么。
-  * **输入**：用户的原始问题字符串 (e.g., "什么是RAG?")。
-  * **输出**：一个包含最终答案和引用来源的结构化数据（通常是 Python 字典），供 API 层返回给前端。
+- **数据访问层**：`vector_store_repository.py` - ChromaDB原子操作，单一职责设计
+- **服务业务层**：`document_service.py`（文档处理）、`embedding_service.py`（向量化）、`ingestion_service.py`（入库编排）
+- **工具脚本层**：`ingest_data.py` - 生产入库工具，支持配置化与命令行覆盖  
+- **测试验证层**：端到端测试流程，覆盖入库→检索全链路
+- **配置管理**：统一的路径配置，支持环境变量覆盖
 
-### `services/` 目录 (原子服务层)
+## 📌 开发者提示
 
-这个目录下的文件提供具体的、可复用的“专业职能”服务。
+- 项目内部模块多使用相对导入；如需以模块方式运行，请在仓库根目录下执行（示例）：
+  - `python -m backend.app.services.embedding_service`（建议在该文件中补充 `if __name__ == "__main__":` 测试入口）
+- 依赖安装：
+  - 建议使用 Conda 创建环境：`conda create -n rag_env python=3.11`；进入 `project-RAG-LLM/backend` 后 `pip install -r requirements.txt`
 
-  * **`document_service.py`**
-
-      * **这个文件只关注**：如何将一个**单个**原始文件（如 PDF, TXT）转换成标准化的文本块列表（List of Chunks）。它负责加载、解析、清洗和切分。
-      * **输入**：一个文件的路径或文件对象。
-      * **输出**：一个由多个字符串组成的文本块列表。
-
-  * **`vector_store_service.py`**
-
-      * **这个文件只关注**：如何与底层的向量数据库进行交互（增、查）。它屏蔽了具体数据库（如 Chroma, FAISS）的实现细节。
-      * **输入**：在**存入**时，输入是文本块和对应的向量；在**查询**时，输入是查询向量。
-      * **输出**：在**查询**时，输出是相关的文本块列表。
-
-### `api/chat.py` 和 `api/document.py` (API 接口层)
-
-这两个文件是后端与前端通信的**网关**，是项目的“前台接待”。
-
-  * **这两个文件只关注**：处理 HTTP 请求和发送 HTTP 响应。它们负责解析前端传来的 JSON 数据或文件，调用相应的业务逻辑（`core` 或 `services`），然后将处理结果打包成 JSON 格式返回给前端。
-  * **输入**：来自前端的 HTTP 请求。
-  * **输出**：发送给前端的、符合接口约定的 JSON 格式的 HTTP 响应。
-
-### `scripts/ingest_data.py` (离线处理脚本)
-
-这个文件是用于执行批量化、耗时较长的数据处理任务的**独立脚本**。它就像项目的“施工队长”。
-
-  * **这个文件只关注**：编排整个离线知识库的构建流程。它不处理实时网络请求。
-  * **输入**：无直接输入，它会主动读取 `data/raw_documents/` 目录下的文件。
-  * **输出**：一个构建完成并保存在 `data/vector_store/` 的向量数据库，以及在命令行中打印的日志信息。
-  
-## 项目运行：
-### 初始环境构建
-- conda create -n rag_env python=3.11
-- conda activate rag_env
-- cd project-RAG-LLM\backend
-- pip install -r requirements.txt
-
-### python后端说明
-- 项目只有在出口处使用绝对导入，这里指的是run.py
-- 项目内部均使用相对导入 .xxx.xxx.xxx 所以要运行单个模块的话(以llm_handler.py为例，根目录为project-RAG-LLM) ： python -m backend.app.core.llm_handler (要写 if __name__ == "__main__")
-- 运行整个项目 python run.py
-- 在LLM_RAG\project-RAG-LLM\backend使用pip freeze > requirements.txt 一键添加包信息，方便其他人使用
-
-### 貌似没有文件的文件夹GitHub不会识别，所以我在前端里塞了几个没用的文件
+后续将逐步补全 RAG 管道与 API 层，并提供统一的启动方式（Flask + CORS）。
