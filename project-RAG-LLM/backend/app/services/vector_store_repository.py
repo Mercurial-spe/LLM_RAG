@@ -266,7 +266,7 @@ class VectorStoreRepository:
 			{
 				'content': str,
 				'metadata': { ...原有元数据... }
-				'distance': float  (Chroma 默认返回)
+				'similarity': float  (Chroma 默认返回)
 			}
 		"""
 		if not query_vector:
@@ -295,12 +295,14 @@ class VectorStoreRepository:
 			formatted_results: List[Dict[str, Any]] = []
 			
 			for doc, metadata, distance in zip(documents, metadatas, distances):
-				metadata['similarity'] = math.exp(-distance) # 转化为相似度分数
+				
+				# Chroma 返回的距离是越小越相似，转换为相似度分数 (0-1)
+				similarity = math.exp(-distance) 
 				
 				formatted_results.append({
 					"content": doc, 
 					"metadata": metadata,
-					"distance": distance # 也可放在顶层
+					"similarity": similarity
 				})
 
 			logger.info(f"检索完成 - 返回 {len(formatted_results)}/{top_k} 个结果")
