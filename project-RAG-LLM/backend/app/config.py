@@ -8,6 +8,12 @@ from dotenv import load_dotenv
 # 这会寻找项目中的 .env 文件并将其内容加载到系统环境变量中
 load_dotenv()
 
+# --- 路径根定位（确保无论从哪里启动进程，路径都稳定） ---
+_THIS_FILE = Path(__file__).resolve()
+# 目录层级：.../project-RAG-LLM/backend/app/config.py
+# parents[0]=app, [1]=backend, [2]=project-RAG-LLM
+PROJECT_ROOT = _THIS_FILE.parents[2]
+
 # --- LLM配置 ---
 # 使用 os.getenv() 来安全地获取变量，如果变量不存在，它会返回 None
 MODELSCOPE_API_KEY = os.getenv("MODELSCOPE_API_KEY")
@@ -24,12 +30,6 @@ EMBEDDING_DIMENSION = 1024  # 默认使用1024维，性能和存储的平衡
 # 嵌入批处理配置
 EMBEDDING_BATCH_SIZE = 10  # text-embedding-v4的批次大小上限为10
 EMBEDDING_MAX_TOKENS = 8192  # 单次最大处理Token数
-
-# --- 路径根定位（确保无论从哪里启动进程，路径都稳定） ---
-_THIS_FILE = Path(__file__).resolve()
-# 目录层级：.../project-RAG-LLM/backend/app/config.py
-# parents[0]=app, [1]=backend, [2]=project-RAG-LLM
-PROJECT_ROOT = _THIS_FILE.parents[2]
 
 # --- 向量数据库配置 ---
 VECTOR_STORE_TYPE = "chroma"  # 使用ChromaDB
