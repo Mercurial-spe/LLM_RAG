@@ -1,6 +1,6 @@
 # 项目进度记录（RAG-LLM）
 
-更新时间：2025-10-23
+更新时间：2025-10-28
 
 本文件用于跟踪当前阶段已完成的工作、测试与结果摘要，以及项目整体待办清单。后续每个阶段持续在此文档增量更新。
 
@@ -18,12 +18,12 @@
 
 ### 1) 核心系统架构设计与实现
 
-- **全新构建RAG入库系统**：从零设计并实现完整的文档处理→向量化→存储链路
-- **分层架构实现**：
-  - 数据访问层：`vector_store_repository.py`（ChromaDB封装，原子操作设计）
-  - 业务服务层：`document_service.py`、`embedding_service.py`、`ingestion_service.py`
-  - 工具脚本层：`ingest_data.py`（生产级入库工具）
-  - 测试验证层：端到端测试覆盖（`test_ingestion_flow.py`、`test_similarity_search.py`）
+- 全新构建入库系统：从零实现“文档处理→向量化→存储→增量同步”的链路
+- 分层架构实现（命名已重构对齐代码）：
+  - 数据访问层：`vector_store_repository.py`（ChromaDB 封装，原子操作设计）
+  - 业务服务层：`document_ingest_service.py`、`embedding_service.py`、`sync_service.py`
+  - 工具脚本层：`scripts/ingest_data.py`（生产级入库工具，负责整合与触发同步）
+  - 测试验证层：预留（当前仅 `tests/test_api.py` 存在且为空，完整测试将后续补齐）
 
 ### 2) 配置与路径管理优化
 
@@ -41,10 +41,10 @@
 
 ### 3) 文档处理系统
 
-- **新建** `backend/app/services/document_service.py`：
-  - 多格式支持：TXT/MD（UTF-8编码）、PDF、DOC/DOCX、PPTX（可选）
-  - 基于LangChain加载器与`RecursiveCharacterTextSplitter`智能切分
-  - 一站式处理流程：`process_document(path)` → 加载→切分→向量化→输出标准格式
+- 新建并重构为 `backend/app/services/document_ingest_service.py`：
+  - 多格式支持：TXT/MD（UTF-8 编码）、PDF、DOCX/DOC（DOC 需 LibreOffice）
+  - 基于 LangChain Loader 与 `RecursiveCharacterTextSplitter` 智能切分
+  - 输出标准 chunk 结构，含确定性 `id` 与完整 `metadata`
 
 - **新建** `backend/app/services/embedding_service.py`：  
   - 阿里云百炼`text-embedding-v4`集成（OpenAI SDK兼容）
@@ -53,22 +53,22 @@
 
 ### 4) 向量库存储系统
 
-- **新建** `backend/app/services/vector_store_repository.py`：
+- 新建 `backend/app/services/vector_store_repository.py`：
   - ChromaDB数据访问层封装，严格遵循Repository模式
   - 原子操作设计：`upsert_batch`、`query_similar`、`delete_by_source`、`get_collection_stats`等
   - 支持相似度检索与元数据过滤，自动计算相似度分数
 
-- **新建** `backend/app/services/ingestion_service.py`：
-  - 入库编排服务，实现增量更新逻辑（基于文件MD5对比）
-  - 目录扫描→变更检测→批量处理→分批入库→删除清理
-  - 支持健康检查与统计报告
+- 新建并统一编排为 `backend/app/services/sync_service.py`：
+  - 单向差异同步：扫描本地状态 ↔ 读取向量库状态 → 计算“新增/更新/删除”
+  - 删除旧 chunk → 重新摄取与向量化 → Upsert 写入
+  - 输出同步统计摘要
 
 ### 5) 工具与测试系统
 
-- **重构** `scripts/ingest_data.py`：
-  - 生产级入库脚本，集成配置系统
-  - 命令行接口：支持目录指定与配置默认值
-  - 完整日志输出、进度跟踪、错误处理
+- 重构 `scripts/ingest_data.py`：
+  - 读取 `backend/app/config.py` 的绝对路径配置
+  - 初始化摄取/嵌入/仓库/同步四大服务，执行一次完整同步
+  - 完整日志与同步结果汇总（新增/更新/删除文件与 chunk 数）
 
 - **新建** 测试验证套件：
   - `backend/tests/test_ingestion_flow.py`：端到端入库流程测试
@@ -88,41 +88,18 @@
 
 ## 三、测试结果摘要（本地环境：Windows / conda env）
 
-### 完整入库系统测试
+### 当前可运行验证
 
-- **端到端入库流程**（`test_ingestion_flow.py`）
-  - ✅ 文档加载、切分、向量化、入库全流程验证
-  - ✅ 数据一致性检查：入库数量与数据库记录数匹配
-  - ✅ 测试数据库生成与保留机制
+- 生产入库脚本（`scripts/ingest_data.py`）
+  - ✅ 读取配置并执行单向差异同步
+  - ✅ 记录新增/更新/删除的文件与 chunk 统计
+  - ⚠️ 首次运行需准备数据目录与 API Key
 
-- **相似度检索测试**（`test_similarity_search.py`）
-  - ✅ 查询向量化 → 相似度检索 → 结果展示完整流程
-  - ✅ 相似度分数计算与排序功能
-  - ✅ 元数据完整性（来源文件、距离、相似度等）
+### 分组件现状
 
-- **生产入库脚本**（`ingest_data.py`）
-  - ✅ 配置集成：自动读取默认文档目录
-  - ✅ 增量更新：基于MD5的变更检测
-  - ✅ 健康检查：入库统计与数据库状态报告
-
-### 分组件验证结果
-
-- **文档处理**（多格式支持）
-  - TXT（`计网大纲.txt`）：✅ 通过（被切分为 3 个 chunk）
-  - MD（`小测选择题.md`）：✅ 通过（被切分为 27 个 chunk）
-  - PDF（`第四章主观作业.pdf`）：✅ 通过（被切分为 7 个 chunk）
-  - DOCX（`第5章（网络层之主观题）_答案.docx`）：✅ 通过（被切分为 19 个 chunk）
-  - DOC（`第2章（物理层）_主观题_答案版.doc`）：❌ 失败（缺少 LibreOffice，`soffice` 未找到）
-
-- **嵌入服务**
-  - ✅ 阿里云百炼API连接正常，单条与批量向量化均成功
-  - ✅ 1024维向量输出，中文文本处理良好
-  - ⚠️ Windows环境下偶发OpenAI SDK平台信息采集阻塞（已知问题，不影响功能）
-
-- **向量库操作**
-  - ✅ ChromaDB初始化与持久化存储
-  - ✅ 批量upsert、相似度查询、统计查询等核心功能
-  - ✅ 元数据完整性与查询过滤功能
+- 文档处理：TXT/MD/PDF/DOCX 支持良好；DOC 需安装 LibreOffice（`soffice`）
+- 嵌入服务：DashScope `text-embedding-v4` 正常（1024 维，支持批量）
+- 向量库：ChromaDB 初始化与持久化正常；支持 upsert/删除/检索/状态读取
 
 ---
 
@@ -170,7 +147,7 @@
 
 ## 六、下阶段开发路线图
 
-### A. RAG查询流程（优先级：高）
+### A. RAG 查询流程（优先级：高）
 
 - [ ] 完成 `backend/app/core/rag__pipeline.py`
   - Query→向量化→相似检索→上下文组装→LLM生成→答案+引用
@@ -182,7 +159,7 @@
   - 支持流式/非流式输出选择
   - 多模型支持（后续扩展）
 
-### B. API服务层（优先级：高）
+### B. API 服务层（优先级：高）
 
 - [ ] 实现 `backend/app/api/chat.py`（POST `/api/chat`）
   - 请求参数校验（Pydantic模型）
@@ -237,43 +214,26 @@
 
 ## 七、快速验证指南（当前版本）
 
-### 完整系统测试流程
+1. 环境准备
 
-1. **环境准备**
-   ```powershell
-   # 配置API密钥
-   # 在 backend/.env 中设置：
-   # DASHSCOPE_API_KEY=your_api_key
-   ```
+  ```powershell
+  # 配置 API 密钥（示例）
+  # 在 backend/.env 中设置：
+  # DASHSCOPE_API_KEY=your_api_key
+  ```
 
-2. **端到端入库测试**
-   ```powershell
-   # 完整入库流程测试（单文件）
-   python project-RAG-LLM/backend/tests/test_ingestion_flow.py
-   ```
+1. 生产入库脚本
 
-3. **相似度检索测试**
-   ```powershell
-   # 基于上述入库结果的检索测试
-   python project-RAG-LLM/backend/tests/test_similarity_search.py
-   ```
-
-4. **生产入库脚本**
-   ```powershell
-   # 默认目录批量入库
-   python project-RAG-LLM/scripts/ingest_data.py
-   
-   # 指定目录入库
-   python project-RAG-LLM/scripts/ingest_data.py -d /path/to/documents
-   ```
+  ```powershell
+  # 默认目录批量入库
+  python project-RAG-LLM/scripts/ingest_data.py
+  # 如需自定义目录，请在 backend/.env 设置 RAW_DOCUMENTS_PATH
+  ```
 
 ### 分组件验证
 
 ```powershell
-# 文档加载测试（不向量化）
-python project-RAG-LLM/backend/tests/test_load_only.py
-
-# LLM调用演示
+# LLM 调用演示
 python project-RAG-LLM/backend/run.py
 ```
 
