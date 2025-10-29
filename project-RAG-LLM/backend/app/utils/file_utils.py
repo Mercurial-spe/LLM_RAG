@@ -1,25 +1,47 @@
-"""通用文件工具函数"""
+"""通用文件与文本工具函数
+
+包含：
+- 文件基础信息提取（名称/大小/修改时间/后缀）
+- 文本 SHA1 计算
+- 当前 UTC ISO8601 时间生成
+"""
+
+from __future__ import annotations
 
 import hashlib
 import os
+from datetime import datetime
+from typing import Any, Dict
 
 
-def calculate_file_md5(file_path: str) -> str:
-	"""计算文件的 MD5 哈希
+def get_file_info(file_path: str) -> Dict[str, Any]:
+	"""提取文件【物理】基本信息。
 
-	Args:
-		file_path: 文件路径
-	Returns:
-		32位十六进制 MD5 字符串
-	Raises:
-		FileNotFoundError: 当文件不存在时
+	返回字段：
+	- file_name: 文件名（不含路径）
+	- file_size: 文件大小（字节）
+	- file_mtime: 最近修改时间（浮点数 Unix 时间戳）
+	- source_type: 文件后缀（小写、不含点）
 	"""
-	if not os.path.exists(file_path):
-		raise FileNotFoundError(f"文件不存在: {file_path}")
+	st = os.stat(file_path)
+	return {
+		"file_name": os.path.basename(file_path),
+		"file_size": st.st_size,
+		# 返回原始 mtime 时间戳，便于差异比较
+		"file_mtime": st.st_mtime,
+		"source_type": os.path.splitext(file_path)[1].lstrip(".").lower(),
+	}
 
-	md5_hash = hashlib.md5()
-	with open(file_path, "rb") as f:
-		for chunk in iter(lambda: f.read(4096), b""):
-			md5_hash.update(chunk)
-	return md5_hash.hexdigest()
+
+def sha1_text(text: str) -> str:
+	"""计算字符串的 SHA1 哈希（十六进制）。"""
+	return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def now_iso() -> str:
+	"""获取当前 UTC 时间的 ISO8601 字符串（结尾带 Z）。"""
+	return datetime.utcnow().isoformat() + "Z"
+
+
+
 

@@ -2,9 +2,9 @@
 
 # RAG-LLM 智能问答系统
 
-本项目基于 RAG（Retrieval-Augmented Generation）思想，采用前后端分离架构：后端为 Python 代码库（Flask 预留，当前以服务类和脚本为主），前端预留 Vue 目录。当前阶段已完成文档加载/切分、嵌入（向量化）、向量库仓库与入库编排等基础能力。
+本项目基于 RAG（Retrieval-Augmented Generation）思想，采用前后端分离架构：后端为 Python 代码库（Flask 预留，当前以服务类和脚本为主），前端预留 Vue 目录。当前阶段已完成文档加载/切分、嵌入（向量化）、向量库仓库与“单向差异同步”入库编排等基础能力。
 
-## 📁 实际项目结构（已对齐当前代码）
+## 📁 项目结构（已对齐当前代码）
 
 ```plaintext
 project-RAG-LLM/
@@ -23,50 +23,59 @@ project-RAG-LLM/
 │       ├── core/                    # 核心逻辑
 │       │   ├── llm_handler.py       # LLM 调用封装（基于 ModelScope 兼容 OpenAI SDK）
 │       │   └── rag__pipeline.py     # RAG 主流程（占位，尚未实现）
-│       ├── services/                # 服务层（已实现）
-│       │   ├── document_service.py      # 文档加载/切分与向量化编排
-│       │   ├── embedding_service.py     # 嵌入服务（DashScope text-embedding-v4）
-│       │   ├── ingestion_service.py     # 入库编排（增量对比、分批写入）
-│       │   └── vector_store_repository.py # 向量库仓库（ChromaDB 数据访问层）
-│       ├── tests/                   # 后端测试脚本（可直接运行）
-│       │   ├── test_document_service.py
-│       │   ├── test_load_only.py
-│       │   ├── test_simple.py
-│       │   └── test_ingestion_flow.py   # 占位
+│       ├── services/                # 服务层（已实现，已重构命名）
+│       │   ├── document_ingest_service.py  # 文档加载/切分（不含向量化与存储）
+│       │   ├── embedding_service.py        # 嵌入服务（DashScope text-embedding-v4，单例+批处理）
+│       │   ├── sync_service.py             # 单向差异同步（增量对比→删除→重建入库）
+│       │   └── vector_store_repository.py  # 向量库仓库（ChromaDB 数据访问层，原子操作）
+│       ├── tests/
+│       │   └── test_api.py           # 预留（当前为空）
 │       └── utils/
-│           └── file_utils.py        # 通用文件工具（MD5 等）
+│           └── file_utils.py        # 通用文件工具（哈希/时间/文件信息）
 ├── data/
 │   ├── raw_documents/               # 原始文档（txt/md/pdf/docx 等）
 │   └── vector_store/                # 向量库持久化目录（ChromaDB）
 ├── scripts/
-│   └── ingest_data.py               # 入库脚本（已实现，支持命令行与配置文件）
+│   └── ingest_data.py               # 入库脚本（已实现，整合配置与同步服务）
 └── frontend/                        # 前端占位（便于 Git 识别目录）
 ```
 
-提示：当前 API 与 RAG 主链路尚未落地，可先使用 tests 与 services 验证加载、切分与向量化流程；向量库已具备仓库与入库编排能力。
+提示：API 与 RAG 主链路尚未落地，可先使用脚本和服务层验证“加载→切分→向量化→入库→检索”的链路；向量库已具备仓库与入库编排能力。
 
 ## ⚙️ 当前已实现的核心能力
 
-- **完整入库系统**（从零构建）
-  - 文档处理（`services/document_service.py`）：支持 TXT/MD（UTF-8）、PDF、DOCX/DOC、PPTX（可选）
-  - 嵌入服务（`services/embedding_service.py`）：阿里云百炼 `text-embedding-v4`，单例模式，支持批量处理
-  - 向量库仓库（`services/vector_store_repository.py`）：ChromaDB 数据访问层，原子操作设计
-  - 入库编排（`services/ingestion_service.py`）：增量更新、MD5去重、分批入库
-  - 入库脚本（`scripts/ingest_data.py`）：命令行工具，支持配置化目录扫描
+- 文档摄取（`services/document_ingest_service.py`）
+  - 支持 TXT/MD（UTF-8）、PDF、DOCX/DOC（DOC 需系统安装 LibreOffice）、可按需支持更多
+  - 采用 LangChain Loader + `RecursiveCharacterTextSplitter` 切分
+  - 统一输出：`{"id", "content", "metadata"}`，元数据包含来源路径、mtime/size、chunk_hash 等
 
-- **核心特性**
-  - 统一块结构：`{"content": str, "metadata": {source, chunk_id, file_md5, ...}, "embedding": [...]}`
-  - 增量更新：基于文件MD5比对，只处理新增/变更文件
-  - 批量优化：文本切分（`RecursiveCharacterTextSplitter`）、嵌入批处理（batch=10）、向量库分批写入
-  - 完整测试：端到端入库测试（`test_ingestion_flow.py`）、相似度检索测试（`test_similarity_search.py`）
+- 文本向量化（`services/embedding_service.py`）
+  - 阿里云百炼 `text-embedding-v4`（OpenAI SDK 兼容模式）
+  - 单例模式；支持批量处理（自动按 batch=10 分批）
+  - 默认 1024 维，可通过配置调整
+
+- 向量库存储（`services/vector_store_repository.py`）
+  - 使用 ChromaDB（原生客户端）
+  - 原子操作：`upsert_batch`、`delete_by_source`、`delete_by_ids`、`get_indexed_file_state`、`query_similar`
+  - 便捷桥接：提供 `as_langchain_retriever()` 以适配 LangChain RAG 查询
+
+- 单向差异同步（`services/sync_service.py`）
+  - 扫描本地文件状态 ↔ 读取向量库状态 → 计算增量差异
+  - 删除已变更/已删除文件的旧 chunk；对新增/更新文件重新摄取+向量化+Upsert
+  - 输出同步统计：新增/更新/删除文件数，新增/删除 chunk 数
+
+- 入库脚本（`scripts/ingest_data.py`）
+  - 自动加载配置并初始化各服务
+  - 基于 `RAW_DOCUMENTS_PATH` 的目录级增量入库
+  - 详细日志与总结输出
 
 ## 🧭 规划中的能力（占位/未完成功能）
 
-- **RAG 查询流程**（`core/rag__pipeline.py`）：Query→向量检索→上下文组装→LLM生成→答案+引用
-- **API 服务层**（`app/api/chat.py`、`app/api/document.py`）：HTTP接口，对接前端交互
-- **LLM 集成优化**（`core/llm_handler.py`）：流式输出、错误处理、多模型支持
+- RAG 查询流程（`core/rag__pipeline.py`）：Query→向量检索→上下文组装→LLM 生成→答案+引用
+- API 服务层（`app/api/chat.py`、`app/api/document.py`）：HTTP 接口，对接前端交互
+- LLM 集成优化（`core/llm_handler.py`）：流式输出、错误处理、多模型支持
 
-## � 配置与环境
+## 🔧 配置与环境
 
 - 在 `backend/.env` 配置：
   - `MODELSCOPE_API_KEY=...`
@@ -77,52 +86,54 @@ project-RAG-LLM/
   - 文档目录：`RAW_DOCUMENTS_PATH`（默认项目绝对路径，支持环境变量覆盖）
   - 切分：`CHUNK_SIZE=500`、`CHUNK_OVERLAP=50`
 
-### 路径配置增强
+### 路径配置说明
 
-- **稳定路径**：`VECTOR_STORE_PATH` 和 `RAW_DOCUMENTS_PATH` 现在使用基于项目根的绝对路径，无论从哪里启动进程都保持一致
-- **环境变量覆盖**：可通过 `.env` 文件或系统环境变量自定义路径：
+- 稳定路径：`VECTOR_STORE_PATH` 与 `RAW_DOCUMENTS_PATH` 均基于项目根自动计算为绝对路径，无论工作目录如何变化都稳定
+- 环境变量覆盖：可通过 `.env` 或系统环境变量自定义路径：
 
   ```bash
   # .env 文件示例
-  VECTOR_STORE_PATH=/path/to/custom/vector_store
-  RAW_DOCUMENTS_PATH=/path/to/custom/documents
+  VECTOR_STORE_PATH=/abs/path/to/vector_store
+  RAW_DOCUMENTS_PATH=/abs/path/to/documents
   ```
 
-## ▶️ 快速验证（本地，PowerShell）
+## ▶️ 快速验证（Windows PowerShell）
 
-以下脚本均可直接运行验证入库系统：
+- 生产入库脚本（目录批量增量处理）
 
-- **完整入库流程测试**（单文件处理）
-  - 运行：`python project-RAG-LLM/backend/tests/test_ingestion_flow.py`
-  - 功能：加载→切分→向量化→入库→验证
+  ```powershell
+  # 激活环境（示例）
+  conda activate rag_llm_env
 
-- **相似度检索测试**（依赖上述入库结果）
-  - 运行：`python project-RAG-LLM/backend/tests/test_similarity_search.py`  
-  - 功能：问题向量化→相似检索→结果展示
+  # 执行入库（读取 backend/app/config.py 的 RAW_DOCUMENTS_PATH）
+  python project-RAG-LLM/scripts/ingest_data.py
+  ```
 
-- **生产入库脚本**（目录批量处理）
-  - 运行：`python project-RAG-LLM/scripts/ingest_data.py`
-  - 功能：扫描默认目录→增量入库→健康检查
+- 向量化服务自检（带演示）
 
-- **其他验证脚本**
-  - 仅文档解析：`python project-RAG-LLM/backend/tests/test_load_only.py`
-  - LLM调用演示：`python project-RAG-LLM/backend/run.py`
+  ```powershell
+  python project-RAG-LLM/backend/app/services/embedding_service.py
+  ```
+
+- LLM 调用演示（ModelScope 兼容 OpenAI SDK）
+
+  ```powershell
+  python project-RAG-LLM/backend/app/core/llm_handler.py
+  ```
 
 注意：若在 Windows 上遇到 OpenAI SDK 平台信息采集导致的偶发阻塞，可尝试升级/降级 `openai` 版本或增加重试与超时；`.doc` 解析依赖 LibreOffice（`soffice`），未安装时请先转为 `.docx` 再处理。
 
-## 🧩 架构设计（已实现部分）
+## 🧩 分层架构（已实现部分）
 
-- **数据访问层**：`vector_store_repository.py` - ChromaDB原子操作，单一职责设计
-- **服务业务层**：`document_service.py`（文档处理）、`embedding_service.py`（向量化）、`ingestion_service.py`（入库编排）
-- **工具脚本层**：`ingest_data.py` - 生产入库工具，支持配置化与命令行覆盖  
-- **测试验证层**：端到端测试流程，覆盖入库→检索全链路
-- **配置管理**：统一的路径配置，支持环境变量覆盖
+- 数据访问层：`vector_store_repository.py` - ChromaDB 原子操作，单一职责设计
+- 服务业务层：`document_ingest_service.py`（文档处理）、`embedding_service.py`（向量化）、`sync_service.py`（差异同步）
+- 工具脚本层：`ingest_data.py` - 生产入库工具
+- 配置管理：统一路径配置，支持环境变量覆盖
 
 ## 📌 开发者提示
 
-- 项目内部模块多使用相对导入；如需以模块方式运行，请在仓库根目录下执行（示例）：
-  - `python -m backend.app.services.embedding_service`（建议在该文件中补充 `if __name__ == "__main__":` 测试入口）
+- 由于目录名含有连字符（`project-RAG-LLM`），不建议使用 `-m` 方式作为包运行，直接以文件路径运行脚本更稳妥
 - 依赖安装：
-  - 建议使用 Conda 创建环境：`conda create -n rag_env python=3.11`；进入 `project-RAG-LLM/backend` 后 `pip install -r requirements.txt`
+  - 建议使用 Conda 创建环境：`conda create -n rag_llm_env python=3.11`；进入 `project-RAG-LLM/backend` 后：`pip install -r requirements.txt`
 
 后续将逐步补全 RAG 管道与 API 层，并提供统一的启动方式（Flask + CORS）。
