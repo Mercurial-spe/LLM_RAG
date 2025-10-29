@@ -12,7 +12,7 @@ def call_model_stream(user_prompt: str):
     )
 
     response = client.chat.completions.create(
-        model='ZhipuAI/GLM-4.6',
+        model='Qwen/Qwen3-8B',
         messages=[
             {'role': 'system', 'content': 'You are a helpful assistant.'},
             {'role': 'user', 'content': user_prompt}

@@ -1,0 +1,158 @@
+.settings-container {
+  padding: 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.settings-header {
+  margin-bottom: 2rem;
+}
+
+.settings-header h2 {
+  margin: 0;
+  color: #1e293b;
+  font-size: 1.75rem;
+}
+
+.settings-content {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.settings-section {
+  margin-bottom: 2.5rem;
+}
+
+.settings-section:last-of-type {
+  margin-bottom: 2rem;
+}
+
+.settings-section h3 {
+  color: #1e40af;
+  margin: 0 0 1.5rem 0;
+  font-size: 1.25rem;
+}
+
+.setting-item {
+  margin-bottom: 1.5rem;
+}
+
+.setting-item label {
+  display: block;
+  font-weight: 500;
+  color: #334155;
+  margin-bottom: 0.5rem;
+}
+
+.setting-item input[type="text"],
+.setting-item input[type="number"] {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.setting-item input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.slider-container input[type="range"] {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  outline: none;
+  -webkit-appearance: none;
+  background: #e2e8f0;
+}
+
+.slider-container input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.slider-container input[type="range"]::-webkit-slider-thumb:hover {
+  background: #1d4ed8;
+}
+
+.slider-container input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #2563eb;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+.slider-container input[type="range"]::-moz-range-thumb:hover {
+  background: #1d4ed8;
+}
+
+.slider-value {
+  min-width: 40px;
+  text-align: center;
+  font-weight: 500;
+  color: #2563eb;
+}
+
+.setting-description {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.875rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.settings-actions button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.save-button {
+  background: #2563eb;
+  color: white;
+  flex: 1;
+}
+
+.save-button:hover {
+  background: #1d4ed8;
+}
+
+.reset-button {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.reset-button:hover {
+  background: #e2e8f0;
+}
+
