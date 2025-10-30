@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from ..core.llm_handler import call_model_stream
+from ..core.rag_agent import stream_messages, invoke
 
 
 chat_bp = Blueprint("chat", __name__)
@@ -52,15 +53,10 @@ def chat_message_stream():
     @stream_with_context
     def generate_sse():
         try:
-            for chunk in call_model_stream(user_message):
-                delta = getattr(chunk.choices[0], "delta", None)
-                content = getattr(delta, "content", None) if delta else None
-                if content:
-                    # SSE 格式：以 data: 开头，两个换行分隔事件
-                    yield f"data: {content}\n\n"
-            # 结束标记，前端可据此收尾
+            # 使用基于 LangChain Agent 的 RAG 流，只推送“模型文本”
+            for text in stream_messages(user_message):
+                yield f"data: {text}\n\n"
             yield "event: done\n"
-            # yield f"data: {{\"session_id\": \"{session_id or ''}\"}}\n\n"
         except Exception as e:
             yield "event: error\n"
             yield f"data: {str(e)}\n\n"
