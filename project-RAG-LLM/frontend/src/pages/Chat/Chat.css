@@ -84,6 +84,76 @@
   margin: 0 0 0.5rem 0;
   line-height: 1.6;
   white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Markdown 渲染样式优化 */
+.message-content ul,
+.message-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.message-content li {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
+.message-content pre {
+  background: #f1f5f9;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.message-content code {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.message-content pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.message-content :not(pre) > code {
+  background: #f1f5f9;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 0.75rem 0 0.5rem 0;
+  font-weight: 600;
+}
+
+.message-content blockquote {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 1rem;
+  margin: 0.5rem 0;
+  color: #64748b;
+}
+
+.message-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+
+.message-content th,
+.message-content td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.message-content th {
+  background: #f8fafc;
+  font-weight: 600;
 }
 
 .message-time {

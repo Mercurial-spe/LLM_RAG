@@ -85,7 +85,13 @@ const chatAPI = {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
                 if (data) {
-                  yield data;
+                  // 后端使用 JSON 编码传输，需要解码以还原换行符
+                  try {
+                    yield JSON.parse(data);
+                  } catch {
+                    // 降级：如果解析失败，直接返回原始字符串
+                    yield data;
+                  }
                 }
               }
               // 可选：处理 event: done / error
@@ -99,7 +105,13 @@ const chatAPI = {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data) {
-                yield data;
+                // 后端使用 JSON 编码传输，需要解码以还原换行符
+                try {
+                  yield JSON.parse(data);
+                } catch {
+                  // 降级：如果解析失败，直接返回原始字符串
+                  yield data;
+                }
               }
             }
           }

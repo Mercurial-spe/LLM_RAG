@@ -36,7 +36,7 @@ EMBEDDING_MAX_TOKENS = 8192  # 单次最大处理Token数
 LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL", DASHSCOPE_API_BASE_URL)
 
 # [更新] LLM 的模型名称，更新为 qwen-plus
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen-plus")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Moonshot-Kimi-K2-Instruct")
 
 # [新增] Qwen3 特定参数
 # Qwen3模型通过enable_thinking参数控制思考过程
@@ -53,6 +53,14 @@ VECTOR_STORE_TYPE = "chroma"  # 使用ChromaDB
 # 支持环境变量 VECTOR_STORE_PATH；默认定位到项目 data/vector_store（绝对路径）
 VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT / "data" / "vector_store"))
 VECTOR_COLLECTION_NAME = "course_documents"  # 集合名称
+
+# --- 对话记忆配置 ---
+# 短期记忆数据库路径（SQLite）
+CHAT_MEMORY_DB_PATH = os.getenv("CHAT_MEMORY_DB_PATH", str(PROJECT_ROOT / "data" / "chat_memory" / "chat_memory.db"))
+# Summarization 触发阈值（token数）
+MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMARY", "4000"))
+# Summarization 后保留的消息数
+MEMORY_MESSAGES_TO_KEEP = int(os.getenv("MEMORY_MESSAGES_TO_KEEP", "20"))
 
 # --- 文档来源目录 ---
 # 默认定位到项目 data/raw_documents（绝对路径）

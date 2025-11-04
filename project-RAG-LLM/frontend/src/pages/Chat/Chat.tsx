@@ -5,6 +5,9 @@ import { useState, useRef, useEffect } from 'react';
 import chatAPI from '../../api/chat';
 import type { Message } from '../../types';
 import './Chat.css';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -89,12 +92,18 @@ const Chat = () => {
                 {message.type === 'user' ? '👤' : '🤖'}
               </div>
               <div className="message-content">
-                <p>{message.content}</p>
+                {message.type === 'assistant' ? (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                ) : (
+                  <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</p>
+                )}
                 <span className="message-time">
-                  {message.timestamp.toLocaleTimeString('zh-CN', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {message.timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             </div>
