@@ -12,7 +12,9 @@ def create_app() -> Flask:
 
     # 注册蓝图
     from .api.chat import chat_bp
+    from .api.document import document_bp
     app.register_blueprint(chat_bp, url_prefix="/api")
+    app.register_blueprint(document_bp, url_prefix="/api")
 
     # 运行时配置（如需）
     app.config["DEBUG"] = DEBUG

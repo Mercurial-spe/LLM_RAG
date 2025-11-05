@@ -145,11 +145,14 @@ def _get_agent():
     checkpointer = _get_checkpointer()
     
     # 创建 Summarization Middleware（自动压缩历史）
+    # 在 _get_agent() 中添加
     summarization_middleware = SummarizationMiddleware(
-        model=llm,  # 使用同一个 LLM 进行 summarization
-        max_tokens_before_summary=config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY,
-        messages_to_keep=config.MEMORY_MESSAGES_TO_KEEP,
+        model=llm,
+        max_tokens_before_summary=config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY,  # 临时降低阈值，方便测试
+        messages_to_keep=config.MEMORY_MESSAGES_TO_KEEP,  
     )
+
+    logger.warning(f"🔥 Summarization 配置: max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
     
     system_prompt = (
         "你有一个用于检索上下文的工具 retrieve_context。"

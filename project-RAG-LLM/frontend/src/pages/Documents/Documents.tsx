@@ -5,12 +5,13 @@ import { useState, useEffect } from 'react';
 import documentAPI from '../../api/document';
 import { formatFileSize, formatDateTime, validateFileType } from '../../utils/helpers';
 import { SUPPORTED_FILE_TYPES, MAX_FILE_SIZE } from '../../constants/config';
+import type { Document, UploadProgress } from '../../types';
 import './Documents.css';
 
 const Documents = () => {
-  const [documents, setDocuments] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   useEffect(() => {
     loadDocuments();
@@ -28,8 +29,8 @@ const Documents = () => {
     }
   };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     // 验证文件类型
@@ -54,19 +55,21 @@ const Documents = () => {
         loadDocuments();
       }, 1000);
     } catch (error) {
-      alert('上传失败：' + error.message);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      alert('上传失败：' + errorMessage);
       setUploadProgress(null);
     }
   };
 
-  const handleDelete = async (documentId) => {
+  const handleDelete = async (documentId: string) => {
     if (!confirm('确定要删除这个文档吗？')) return;
 
     try {
       await documentAPI.deleteDocument(documentId);
       loadDocuments();
     } catch (error) {
-      alert('删除失败：' + error.message);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      alert('删除失败：' + errorMessage);
     }
   };
 
