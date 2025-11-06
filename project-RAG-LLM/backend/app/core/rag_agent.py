@@ -56,7 +56,7 @@ _checkpointer = None
 
 
 def _get_retriever():
-    """构建或返回缓存的 LangChain Retriever。"""
+    """构建或返回缓存的 LangChain Retriever（无过滤，向后兼容）。"""
     global _retriever
     if _retriever is not None:
         return _retriever
@@ -65,7 +65,7 @@ def _get_retriever():
     vector_repo = VectorStoreRepository()
     lc_embeddings = LCEmbeddingAdapter(embedding_service)
 
-    # 仅附着到本地 Chroma 集合，负责“读”
+    # 仅附着到本地 Chroma 集合，负责"读"
     _retriever = vector_repo.as_langchain_retriever(
         embedding_instance=lc_embeddings,
         search_type="similarity",
@@ -73,6 +73,40 @@ def _get_retriever():
     )
     logger.info("RAG retriever 已创建并缓存。")
     return _retriever
+
+
+def _get_retriever_with_filter(session_id: str = "1"):
+    """
+    构建带 session_id 过滤的 Retriever（每次创建，不缓存）。
+    
+    Args:
+        session_id: 当前会话ID，默认 "1"
+        
+    检索范围：
+        - session_id = "system" 的文档（全局系统文档）
+        - session_id = 当前会话ID 的文档（用户上传的文档）
+    """
+    embedding_service = EmbeddingService.get_instance()
+    vector_repo = VectorStoreRepository()
+    lc_embeddings = LCEmbeddingAdapter(embedding_service)
+    
+    # 构建过滤条件：检索 system 文档 + 当前会话文档
+    search_kwargs = {
+        "k": 5,
+        "filter": {
+            "$or": [
+                {"session_id": "system"},      # 系统全局文档
+                {"session_id": session_id}     # 当前会话文档
+            ]
+        }
+    }
+    
+    logger.info(f"创建带过滤的 retriever，session_id={session_id}")
+    return vector_repo.as_langchain_retriever(
+        embedding_instance=lc_embeddings,
+        search_type="similarity",
+        search_kwargs=search_kwargs,
+    )
 
 
 @tool("retrieve_context", response_format="content_and_artifact")
@@ -135,24 +169,44 @@ def _get_checkpointer():
     return _checkpointer
 
 
-def _get_agent():
-    """构建或返回缓存的 Agent（集成短期记忆和 Summarization）。"""
-    global _agent
-    if _agent is not None:
-        return _agent
-
+def _get_agent(session_id: str = "1"):
+    """
+    构建 Agent（集成短期记忆和 Summarization）。
+    
+    Args:
+        session_id: 会话ID，用于文档检索过滤
+    
+    注意：不再使用全局缓存，每次根据 session_id 动态创建带过滤的检索工具
+    """
     llm = LLMHandler.get_instance().get_model()
     checkpointer = _get_checkpointer()
     
     # 创建 Summarization Middleware（自动压缩历史）
-    # 在 _get_agent() 中添加
     summarization_middleware = SummarizationMiddleware(
         model=llm,
-        max_tokens_before_summary=config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY,  # 临时降低阈值，方便测试
+        max_tokens_before_summary=config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY,
         messages_to_keep=config.MEMORY_MESSAGES_TO_KEEP,  
     )
 
-    logger.warning(f"🔥 Summarization 配置: max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
+    logger.info(f"🔍 创建 Agent，session_id={session_id}, max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
+    
+    # 【关键】根据 session_id 创建带过滤的 retriever
+    retriever = _get_retriever_with_filter(session_id=session_id)
+    
+    # 【关键】使用闭包创建动态工具（绑定当前 session_id 的 retriever）
+    @tool("retrieve_context", response_format="content_and_artifact")
+    def retrieve_context_filtered(query: str):
+        """检索与问题相关的上下文内容（限定当前会话范围：系统文档+用户上传文档）。"""
+        docs = retriever.invoke(query)
+        serialized = "\n\n".join(
+            (
+                f"Source: {d.metadata.get('source', '<unknown>')}\n"
+                f"Session: {d.metadata.get('session_id', 'unknown')}\n"
+                f"Content: {d.page_content}"
+                for d in docs
+            )
+        )
+        return serialized, docs
     
     system_prompt = (
         "你有一个用于检索上下文的工具 retrieve_context。"
@@ -165,15 +219,15 @@ def _get_agent():
         "4. 长段落要适当分段，提高可读性。"
     )
     
-    _agent = create_agent(
+    agent = create_agent(
         llm,
-        [retrieve_context],
+        [retrieve_context_filtered],  # 使用带过滤的工具
         system_prompt=system_prompt,
         checkpointer=checkpointer,
         middleware=[summarization_middleware],
     )
-    logger.info("RAG agent 已创建并缓存（含短期记忆和 Summarization）。")
-    return _agent
+    logger.info(f"✅ RAG agent 已创建（session_id={session_id}，含短期记忆和 Summarization）")
+    return agent
 
 
 # ---------------------------- 对外接口 ----------------------------
@@ -183,13 +237,14 @@ def invoke(question: str, thread_id: str = "1", timeout_s: Optional[float] = Non
     
     Args:
         question: 用户问题
-        thread_id: 对话线程ID，用于区分不同会话（默认 "1"）
+        thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
         timeout_s: 超时时间（暂未使用）
     
     Returns:
         完整回答文本
     """
-    agent = _get_agent()
+    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
+    agent = _get_agent(session_id=thread_id)
     config_dict = {"configurable": {"thread_id": thread_id}}
     
     # 采用 messages 流，只拼接模型文本块
@@ -215,12 +270,13 @@ def stream_updates(question: str, thread_id: str = "1"):
     
     Args:
         question: 用户问题
-        thread_id: 对话线程ID，用于区分不同会话（默认 "1"）
+        thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
     
     Yields:
         步骤更新字典
     """
-    agent = _get_agent()
+    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
+    agent = _get_agent(session_id=thread_id)
     config_dict = {"configurable": {"thread_id": thread_id}}
     for chunk in agent.stream(
         {"messages": [{"role": "user", "content": question}]},
@@ -236,12 +292,13 @@ def stream_messages(question: str, thread_id: str = "1"):
     
     Args:
         question: 用户问题
-        thread_id: 对话线程ID，用于区分不同会话（默认 "1"）
+        thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
     
     Yields:
         文本块字符串
     """
-    agent = _get_agent()
+    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
+    agent = _get_agent(session_id=thread_id)
     config_dict = {"configurable": {"thread_id": thread_id}}
     for token, meta in agent.stream(
         {"messages": [{"role": "user", "content": question}]},

@@ -109,7 +109,7 @@ class DocumentIngestService:
         """
         return self.splitter.split_documents(docs)
 
-    def process_document(self, full_file_path: str, relative_file_path: str) -> List[Dict[str, Any]]:
+    def process_document(self, full_file_path: str, relative_file_path: str, session_id: str = "system") -> List[Dict[str, Any]]:
         """
         完整处理流程：
         1. 加载文档
@@ -120,6 +120,7 @@ class DocumentIngestService:
         Args:
             full_file_path: 文件的绝对路径（用于读取与状态计算）
             relative_file_path: 相对于项目根目录的路径（用于元数据 source 字段）
+            session_id: 会话ID，默认 "system" 表示系统全局文档
         """
         file_info = get_file_info(full_file_path)
         docs = self.load_document(full_file_path)
@@ -148,6 +149,7 @@ class DocumentIngestService:
                 "chunk_size": chunk_size,
                 "embedding_model": self.embedding_model,
                 "ingested_at": ingested_at,
+                "session_id": session_id,  # 会话ID，用于区分不同会话的文档
             }
 
             processed_chunks.append({

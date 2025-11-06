@@ -57,12 +57,13 @@ class SyncService:
         logger.info("同步服务 (SyncService) 初始化完成。")
         logger.info(f"项目根目录设置为: {self.project_root}")
 
-    def run(self, target_path: str) -> Dict[str, int]:
+    def run(self, target_path: str, session_id: str = "system") -> Dict[str, int]:
         """
         执行一次完整的单向同步。
         
         Args:
             target_path: 要扫描和同步的本地文件夹路径。
+            session_id: 会话ID，默认 "system" 表示系统全局文档
             
         Returns:
             一个包含同步结果统计的字典。
@@ -91,7 +92,7 @@ class SyncService:
         # 3.2 处理新增和更新 (逻辑相同：删除旧的 -> 批量添加新的)
         updated_chunks_count = self._delete_files(files_to_update) # 更新=先删除
         files_to_process = files_to_add + files_to_update
-        added_chunks_count = self._process_and_upsert_files(files_to_process)
+        added_chunks_count = self._process_and_upsert_files(files_to_process, session_id=session_id)
 
         summary = {
             "files_added": len(files_to_add),
@@ -159,19 +160,25 @@ class SyncService:
                 logger.error(f"删除源文件 '{path}' 失败: {e}")
         return total_deleted_chunks
 
-    def _process_and_upsert_files(self, file_paths: List[str]) -> int:
-        """处理文件(摄取、向量化)并批量入库"""
+    def _process_and_upsert_files(self, file_paths: List[str], session_id: str = "system") -> int:
+        """
+        处理文件(摄取、向量化)并批量入库
+        
+        Args:
+            file_paths: 文件路径列表
+            session_id: 会话ID，默认 "system" 表示系统全局文档
+        """
         if not file_paths:
             return 0
 
-        logger.info(f"正在处理 {len(file_paths)} 个新增/更新的文件...")
+        logger.info(f"正在处理 {len(file_paths)} 个新增/更新的文件 (session_id={session_id})...")
         
         all_chunks_to_upsert = []
         for path in file_paths:
             try:
-                # 1. 文档摄取，生成 chunks 和 metadata
+                # 1. 文档摄取，生成 chunks 和 metadata（传入 session_id）
                 full_path = os.path.join(self.project_root, path)
-                processed_chunks = self.ingest_service.process_document(full_path, path)
+                processed_chunks = self.ingest_service.process_document(full_path, path, session_id=session_id)
                 if processed_chunks:
                     all_chunks_to_upsert.extend(processed_chunks)
             except Exception as e:

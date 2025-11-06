@@ -36,7 +36,7 @@ EMBEDDING_MAX_TOKENS = 8192  # 单次最大处理Token数
 LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL", DASHSCOPE_API_BASE_URL)
 
 # [更新] LLM 的模型名称，更新为 qwen-plus
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Moonshot-Kimi-K2-Instruct")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen3-max")
 
 # [新增] Qwen3 特定参数
 # Qwen3模型通过enable_thinking参数控制思考过程

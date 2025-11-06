@@ -1,12 +1,18 @@
 # backend/app/api/document.py
 
 import os
+import logging
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 from datetime import datetime
 
-from ..config import PROJECT_ROOT, MAX_UPLOAD_SIZE
+from ..config import PROJECT_ROOT, MAX_UPLOAD_SIZE, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_MODEL_NAME
+from ..services.document_ingest_service import DocumentIngestService
+from ..services.embedding_service import EmbeddingService
+from ..services.vector_store_repository import VectorStoreRepository
+
+logger = logging.getLogger(__name__)
 
 
 document_bp = Blueprint("document", __name__)
@@ -28,12 +34,16 @@ def upload_document():
     """
     处理文档上传请求
     接收文件并保存到 data/upload_documents 目录
+    同时将文档向量化并存入向量数据库
     """
     # 检查是否有文件在请求中
     if 'file' not in request.files:
         return jsonify({"error": "请求中没有文件"}), 400
     
     file = request.files['file']
+    
+    # 【关键】从请求中获取 session_id，默认为 "1"
+    session_id = request.form.get('session_id', '1')
     
     # 检查用户是否选择了文件
     if file.filename == '':
@@ -77,16 +87,75 @@ def upload_document():
                 "error": f"文件大小超过限制 ({MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB)"
             }), 400
         
-        return jsonify({
-            "message": "文件上传成功",
-            "filename": unique_filename,
-            "original_filename": file.filename,
-            "size": file_size,
-            "path": str(file_path.relative_to(PROJECT_ROOT)),
-            "uploaded_at": datetime.now().isoformat()
-        }), 200
+        # 【新增】文档向量化并存入数据库
+        try:
+            logger.info(f"开始向量化文档: {unique_filename}, session_id: {session_id}")
+            
+            # 1. 初始化服务
+            ingest_service = DocumentIngestService(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                embedding_model=EMBEDDING_MODEL_NAME
+            )
+            embedding_service = EmbeddingService.get_instance()
+            vector_repo = VectorStoreRepository()
+            
+            # 2. 处理文档 → chunks（传入 session_id）
+            relative_path = str(file_path.relative_to(PROJECT_ROOT))
+            processed_chunks = ingest_service.process_document(
+                str(file_path), 
+                relative_path,
+                session_id=session_id
+            )
+            
+            if not processed_chunks:
+                logger.warning(f"文档处理后没有生成任何文本块: {unique_filename}")
+                return jsonify({
+                    "message": "文件上传成功，但文档为空或无法解析",
+                    "filename": unique_filename,
+                    "chunks_processed": 0,
+                    "session_id": session_id,
+                }), 200
+            
+            # 3. 生成向量
+            contents = [chunk['content'] for chunk in processed_chunks]
+            embeddings = embedding_service.embed_texts(contents)
+            
+            # 4. 存入向量数据库
+            ids = [chunk['id'] for chunk in processed_chunks]
+            metadatas = [chunk['metadata'] for chunk in processed_chunks]
+            
+            vector_repo.upsert_batch(
+                ids=ids,
+                documents=contents,
+                embeddings=embeddings,
+                metadatas=metadatas
+            )
+            
+            logger.info(f"✅ 文档已上传并向量化: {unique_filename}, chunks: {len(processed_chunks)}, session_id: {session_id}")
+            
+            return jsonify({
+                "message": "文件上传并索引成功",
+                "filename": unique_filename,
+                "original_filename": file.filename,
+                "size": file_size,
+                "chunks_processed": len(processed_chunks),
+                "session_id": session_id,
+                "path": str(file_path.relative_to(PROJECT_ROOT)),
+                "uploaded_at": datetime.now().isoformat()
+            }), 200
+            
+        except Exception as vector_error:
+            # 向量化失败，但文件已保存
+            logger.error(f"文档向量化失败: {vector_error}", exc_info=True)
+            return jsonify({
+                "error": f"文件已保存但向量化失败: {str(vector_error)}",
+                "filename": unique_filename,
+                "size": file_size
+            }), 500
         
     except Exception as e:
+        logger.error(f"文件上传失败: {e}", exc_info=True)
         return jsonify({
             "error": f"文件上传失败: {str(e)}"
         }), 500

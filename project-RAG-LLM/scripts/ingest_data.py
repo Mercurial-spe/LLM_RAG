@@ -52,7 +52,8 @@ if __name__ == "__main__":
         )
         
         # 3. [关键]：将 config 中定义的【绝对路径】作为基准路径传递给 run 方法
-        summary = sync_service.run(target_path=config.RAW_DOCUMENTS_PATH)
+        # 传入 session_id="system" 标记为系统全局文档
+        summary = sync_service.run(target_path=config.RAW_DOCUMENTS_PATH, session_id="system")
         
         logger.info("\n" + "-" * 20 + " 同步流程完成 " + "-" * 20)
         logger.info(f"✓ 新增文件数: {summary.get('files_added', 0)}")
