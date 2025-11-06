@@ -1,0 +1,40 @@
+ services:
+  backend:
+    build:
+      context: .
+      dockerfile: project-RAG-LLM/backend/Dockerfile
+    container_name: ragllm-backend
+    ports:
+      - "5000:5000"
+    environment:
+      # 可在主机创建 .env 并通过环境变量注入以下值
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - VECTOR_STORE_PATH=/app/project-RAG-LLM/data/vector_store
+      - CHAT_MEMORY_DB_PATH=/app/project-RAG-LLM/data/chat_memory/chat_memory.db
+      - RAW_DOCUMENTS_PATH=/app/project-RAG-LLM/data/raw_documents
+    volumes:
+      # 持久化数据目录（向量库/会话记忆/原始文档）
+      - ./project-RAG-LLM/data:/app/project-RAG-LLM/data
+    networks:
+      - appnet
+
+  frontend:
+    build:
+      context: .
+      dockerfile: project-RAG-LLM/frontend/Dockerfile
+    container_name: ragllm-frontend
+    depends_on:
+      - backend
+    environment:
+      # 让浏览器直接访问宿主机 5000 端口（无需 nginx）
+      - VITE_API_BASE_URL=http://localhost:5000/api
+    ports:
+      - "5173:5173"
+    networks:
+      - appnet
+
+ networks:
+  appnet:
+    driver: bridge
+
+
