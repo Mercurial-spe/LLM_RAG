@@ -12,7 +12,7 @@ const Settings = () => {
     topK: 5,
   });
 
-  const handleChange = (key, value) => {
+  const handleChange = (key: keyof typeof settings, value: string | number) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 

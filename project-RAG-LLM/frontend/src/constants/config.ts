@@ -3,7 +3,7 @@
  */
 
 // API 基础 URL
-export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+export const API_BASE_URL: string =  'http://localhost:5000/api';
 
 // 应用名称
 export const APP_NAME: string = 'RAG-LLM 问答系统';
