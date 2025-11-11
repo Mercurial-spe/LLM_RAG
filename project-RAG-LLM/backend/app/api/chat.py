@@ -68,6 +68,9 @@ def chat_message_stream():
             yield "event: error\n"
             yield f"data: {json.dumps(str(e), ensure_ascii=False)}\n\n"
 
-    # 注意：SSE 必须保持文本流类型
-    return Response(generate_sse(), mimetype="text/event-stream")
+    # 注意：SSE 必须保持文本流类型，并设置正确的响应头
+    response = Response(generate_sse(), mimetype="text/event-stream")
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'  # 禁用 Nginx 缓冲
+    return response
 

@@ -9,6 +9,7 @@
 const getApiBaseUrl = (): string => {
   // 如果设置了环境变量，直接使用
   if (import.meta.env.VITE_API_BASE_URL) {
+    console.log('VITE_API_BASE_URL', import.meta.env.VITE_API_BASE_URL);
     const url = import.meta.env.VITE_API_BASE_URL;
     // 如果是相对路径（以 / 开头），需要转换为完整 URL（包含端口）
     if (url.startsWith('/')) {
@@ -24,6 +25,7 @@ const getApiBaseUrl = (): string => {
   
   // 开发环境：使用 localhost
   if (import.meta.env.DEV) {
+    console.log('DEV', import.meta.env.DEV);
     return 'http://localhost:5000/api';
   }
   
