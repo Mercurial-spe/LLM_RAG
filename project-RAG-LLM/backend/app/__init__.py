@@ -2,6 +2,10 @@ from flask import Flask
 from flask_cors import CORS
 
 from .config import DEBUG
+from .utils.logger import setup_logging
+
+# 【关键】在创建 Flask app 之前配置日志
+setup_logging()
 
 
 def create_app() -> Flask:

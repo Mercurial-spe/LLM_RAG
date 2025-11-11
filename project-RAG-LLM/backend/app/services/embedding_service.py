@@ -10,8 +10,6 @@ from typing import List, Union
 from openai import OpenAI
 from .. import config
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

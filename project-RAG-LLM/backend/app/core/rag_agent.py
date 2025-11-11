@@ -53,6 +53,9 @@ class LCEmbeddingAdapter(Embeddings):
 _retriever = None
 _agent = None
 _checkpointer = None
+# 为不同 session_id 缓存 retriever 和 agent
+_retriever_cache = {}  # {session_id: retriever}
+_agent_cache = {}      # {session_id: agent}
 
 
 def _get_retriever():
@@ -77,7 +80,7 @@ def _get_retriever():
 
 def _get_retriever_with_filter(session_id: str = "1"):
     """
-    构建带 session_id 过滤的 Retriever（每次创建，不缓存）。
+    构建或返回缓存的带 session_id 过滤的 Retriever。
     
     Args:
         session_id: 当前会话ID，默认 "1"
@@ -86,6 +89,13 @@ def _get_retriever_with_filter(session_id: str = "1"):
         - session_id = "system" 的文档（全局系统文档）
         - session_id = 当前会话ID 的文档（用户上传的文档）
     """
+    global _retriever_cache
+    
+    # 检查缓存
+    if session_id in _retriever_cache:
+        logger.info(f"✅ 使用缓存的 retriever，session_id={session_id}")
+        return _retriever_cache[session_id]
+    
     embedding_service = EmbeddingService.get_instance()
     vector_repo = VectorStoreRepository()
     lc_embeddings = LCEmbeddingAdapter(embedding_service)
@@ -101,12 +111,16 @@ def _get_retriever_with_filter(session_id: str = "1"):
         }
     }
     
-    logger.info(f"创建带过滤的 retriever，session_id={session_id}")
-    return vector_repo.as_langchain_retriever(
+    logger.info(f"🔨 创建新的带过滤的 retriever，session_id={session_id}")
+    retriever = vector_repo.as_langchain_retriever(
         embedding_instance=lc_embeddings,
         search_type="similarity",
         search_kwargs=search_kwargs,
     )
+    
+    # 缓存
+    _retriever_cache[session_id] = retriever
+    return retriever
 
 
 @tool("retrieve_context", response_format="content_and_artifact")
@@ -171,13 +185,20 @@ def _get_checkpointer():
 
 def _get_agent(session_id: str = "1"):
     """
-    构建 Agent（集成短期记忆和 Summarization）。
+    构建或返回缓存的 Agent（集成短期记忆和 Summarization）。
     
     Args:
         session_id: 会话ID，用于文档检索过滤
     
-    注意：不再使用全局缓存，每次根据 session_id 动态创建带过滤的检索工具
+    注意：使用缓存机制，相同 session_id 复用同一个 agent 实例
     """
+    global _agent_cache
+    
+    # 检查缓存
+    if session_id in _agent_cache:
+        logger.info(f"✅ 使用缓存的 agent，session_id={session_id}")
+        return _agent_cache[session_id]
+    
     llm = LLMHandler.get_instance().get_model()
     checkpointer = _get_checkpointer()
     
@@ -188,9 +209,9 @@ def _get_agent(session_id: str = "1"):
         messages_to_keep=config.MEMORY_MESSAGES_TO_KEEP,  
     )
 
-    logger.info(f"🔍 创建 Agent，session_id={session_id}, max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
+    logger.info(f"🔨 创建新的 Agent，session_id={session_id}, max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
     
-    # 【关键】根据 session_id 创建带过滤的 retriever
+    # 【关键】根据 session_id 创建带过滤的 retriever（会复用缓存）
     retriever = _get_retriever_with_filter(session_id=session_id)
     
     # 【关键】使用闭包创建动态工具（绑定当前 session_id 的 retriever）
@@ -226,8 +247,35 @@ def _get_agent(session_id: str = "1"):
         checkpointer=checkpointer,
         middleware=[summarization_middleware],
     )
-    logger.info(f"✅ RAG agent 已创建（session_id={session_id}，含短期记忆和 Summarization）")
+    logger.info(f"✅ RAG agent 已创建并缓存（session_id={session_id}，含短期记忆和 Summarization）")
+    
+    # 缓存
+    _agent_cache[session_id] = agent
     return agent
+
+
+# ---------------------------- 缓存管理 ----------------------------
+def clear_cache(session_id: Optional[str] = None):
+    """
+    清理缓存。
+    
+    Args:
+        session_id: 如果指定，只清理该 session 的缓存；如果为 None，清理所有缓存
+    """
+    global _retriever_cache, _agent_cache
+    
+    if session_id is None:
+        # 清理所有缓存
+        _retriever_cache.clear()
+        _agent_cache.clear()
+        logger.info("🗑️ 已清理所有 session 的 agent 和 retriever 缓存")
+    else:
+        # 清理指定 session 的缓存
+        if session_id in _retriever_cache:
+            del _retriever_cache[session_id]
+        if session_id in _agent_cache:
+            del _agent_cache[session_id]
+        logger.info(f"🗑️ 已清理 session_id={session_id} 的 agent 和 retriever 缓存")
 
 
 # ---------------------------- 对外接口 ----------------------------
