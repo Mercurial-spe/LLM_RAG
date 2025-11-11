@@ -72,9 +72,23 @@ CHUNK_OVERLAP = 50  # 文本块重叠大小
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 最大上传文件大小: 10MB
 
 # --- Flask配置 ---
-DEBUG = True
-HOST = "0.0.0.0"
-PORT = 5000
+DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+
+# 监听地址配置
+# 开发环境：0.0.0.0 允许局域网访问
+# 生产环境：建议使用 localhost（仅本机访问，通过 Nginx 反向代理对外）
+HOST = os.getenv("FLASK_HOST", "0.0.0.0")
+PORT = int(os.getenv("FLASK_PORT", "5000"))
+
+# --- CORS 配置 ---
+# 开发环境：启用 CORS（前端 localhost:5173 访问后端 localhost:5000）
+# 生产环境：禁用 CORS（前后端通过 Nginx 统一域名，无跨域问题）
+ENABLE_CORS = os.getenv("ENABLE_CORS", "True").lower() == "true"
+
+# CORS 允许的来源
+# 开发环境：* 或指定 localhost
+# 生产环境：如果启用 CORS，应指定具体域名
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 
 # --- 废弃的 Key (保留以防万一) ---
 # 此 Key 在当前 DashScope 流程中未使用

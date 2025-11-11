@@ -1,27 +1,36 @@
 from flask import Flask
 from flask_cors import CORS
+import logging
 
-from .config import DEBUG
+from .config import DEBUG, ENABLE_CORS, CORS_ORIGINS
 from .utils.logger import setup_logging
 
 # 【关键】在创建 Flask app 之前配置日志
 setup_logging()
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
 
-    # CORS 在应用层统一开启（支持流式响应和跨域）
-    CORS(app, resources={
-        r"/api/*": {
-            "origins": "*",  # 允许所有来源（生产环境建议指定具体域名）
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # 允许的 HTTP 方法
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],  # 允许的请求头
-            "expose_headers": ["Content-Type"],  # 暴露给前端的响应头
-            "supports_credentials": False,  # 不需要凭证（如果改为 True，origins 不能为 *）
-            "max_age": 3600  # preflight 缓存时间（秒）
-        }
-    })
+    # CORS 配置（根据环境变量决定是否启用）
+    # 开发环境：启用 CORS，允许前端跨域访问
+    # 生产环境：禁用 CORS，由 Nginx 反向代理统一处理
+    if ENABLE_CORS:
+        logger.info(f"🔓 CORS 已启用 - 允许来源: {CORS_ORIGINS}")
+        CORS(app, resources={
+            r"/api/*": {
+                "origins": CORS_ORIGINS,  # 从环境变量读取
+                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization", "Accept"],
+                "expose_headers": ["Content-Type"],
+                "supports_credentials": False,
+                "max_age": 3600
+            }
+        })
+    else:
+        logger.info("🔒 CORS 已禁用 - 由 Nginx 反向代理处理跨域")
 
     # 注册蓝图
     from .api.chat import chat_bp

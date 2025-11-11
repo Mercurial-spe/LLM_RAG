@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from ..core.llm_handler import call_model_stream
 from ..core.rag_agent import stream_messages, invoke
+from ..config import ENABLE_CORS, CORS_ORIGINS
 
 
 chat_bp = Blueprint("chat", __name__)
@@ -41,8 +42,17 @@ def chat_history(session_id: str):
 
 
 
-@chat_bp.post("/chat/stream")
+@chat_bp.route("/chat/stream", methods=["POST", "OPTIONS"])
 def chat_message_stream():
+    # 处理 OPTIONS 预检请求（仅在启用 CORS 时需要）
+    if request.method == "OPTIONS" and ENABLE_CORS:
+        response = Response()
+        response.headers['Access-Control-Allow-Origin'] = CORS_ORIGINS
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
+    
     import json
     
     data = request.get_json(silent=True) or {}
@@ -72,5 +82,14 @@ def chat_message_stream():
     response = Response(generate_sse(), mimetype="text/event-stream")
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # 禁用 Nginx 缓冲
+    
+    # 手动添加 CORS 响应头（仅在启用 CORS 时，针对手动创建的 Response 对象）
+    # 生产环境中 ENABLE_CORS=False，由 Nginx 反向代理统一处理
+    if ENABLE_CORS:
+        response.headers['Access-Control-Allow-Origin'] = CORS_ORIGINS
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
+    
     return response
 
