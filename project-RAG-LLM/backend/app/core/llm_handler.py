@@ -14,6 +14,7 @@ LLM 调用服务 (适配器)
 import logging
 from .. import config
 from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
@@ -63,43 +64,71 @@ class LLMHandler:
         if self._client is None:
             try:
                 #  关键：从 config.py 读取 LLM 的特定配置
-                #  使用 DASHSCOPE_API_KEY
-                api_key = config.DASHSCOPE_API_KEY
-                base_url = config.LLM_API_BASE_URL
-                model_name = config.LLM_MODEL_NAME
+                provider = config.LLM_PROVIDER
                 temperature = config.RAG_TEMPERATURE
 
-                if not api_key:
-                    raise ValueError("DASHSCOPE_API_KEY 未在 .env 或环境变量中设置")
-                if not base_url:
-                    raise ValueError("LLM_API_BASE_URL 未在 config.py 中设置")
-                if not model_name:
-                    raise ValueError("LLM_MODEL_NAME 未在 config.py 中设置")
+                logger.info(f"LLM_PROVIDER 设置为: '{provider}'")
 
-                #  构造 LangChain model_kwargs 以传递 extra_body
-                model_kwargs = {}
-                
-                # 为 Qwen3 模型添加 enable_thinking 参数
-                # 从 config.py 中读取这个配置
-                # 注意：LangChain 的 ChatOpenAI 会自动将 model_kwargs 里的
-                # 'extra_body' 传递给底层的 OpenAI 客户端。
-                model_kwargs["extra_body"] = {
-                    "enable_thinking": config.LLM_ENABLE_THINKING
-                }
-                
-                logger.info(f"为模型 {model_name} 设置 model_kwargs: {model_kwargs}")
+                if provider == "ollama":
+                    # ---------------------------------
+                    #  Ollama (本地) 模式
+                    # ---------------------------------
+                    base_url = config.OLLAMA_API_BASE_URL
+                    model_name = config.OLLAMA_MODEL_NAME
 
-                self._client = ChatOpenAI(
-                    model_name=model_name,
-                    api_key=api_key,
-                    base_url=base_url,
-                    temperature=temperature,
-                    streaming=True, # 默认启用流式，API层可以按需调用
-                    model_kwargs=model_kwargs #  传递额外参数
-                )
+                    if not base_url:
+                        raise ValueError("LLM_PROVIDER='ollama' 但 OLLAMA_API_BASE_URL 未设置")
+                    if not model_name:
+                        raise ValueError("LLM_PROVIDER='ollama' 但 OLLAMA_MODEL_NAME 未设置")
+
+                    self._client = ChatOllama(
+                        model=model_name,
+                        base_url=base_url,
+                        temperature=temperature,
+                        # 注意: streaming 在 .stream() 调用时决定，不在构造函数
+                    )
+                    logger.info(f"LLM 处理器 (Ollama) 初始化成功 - 模型: {model_name}, 温度: {temperature}")
+                    logger.info(f"LLM (Ollama) API Base URL: {base_url}")
+
+                elif provider == "dashscope":
+                    # ---------------------------------
+                    #  DashScope (云端) 模式
+                    # ---------------------------------
+                    api_key = config.DASHSCOPE_API_KEY
+                    base_url = config.LLM_API_BASE_URL
+                    model_name = config.LLM_MODEL_NAME
+
+                    if not api_key:
+                        raise ValueError("DASHSCOPE_API_KEY 未在 .env 或环境变量中设置")
+                    if not base_url:
+                        raise ValueError("LLM_API_BASE_URL 未在 config.py 中设置")
+                    if not model_name:
+                        raise ValueError("LLM_MODEL_NAME 未在 config.py 中设置")
+
+                    # 构造 LangChain model_kwargs 以传递 extra_body
+                    model_kwargs = {}
+                    
+                    # 为 Qwen3 模型添加 enable_thinking 参数
+                    model_kwargs["extra_body"] = {
+                        "enable_thinking": config.LLM_ENABLE_THINKING
+                    }
+                    
+                    logger.info(f"为模型 {model_name} (DashScope) 设置 model_kwargs: {model_kwargs}")
+
+                    self._client = ChatOpenAI(
+                        model_name=model_name,
+                        api_key=api_key,
+                        base_url=base_url,
+                        temperature=temperature,
+                        streaming=True, # 默认启用流式，API层可以按需调用
+                        model_kwargs=model_kwargs #  传递额外参数
+                    )
+                    logger.info(f"LLM 处理器 (DashScope) 初始化成功 - 模型: {model_name}, 温度: {temperature}")
+                    logger.info(f"LLM (DashScope) API Base URL: {base_url}")
                 
-                logger.info(f"LLM 处理器初始化成功 - 模型: {model_name}, 温度: {temperature}")
-                logger.info(f"LLM API Base URL: {base_url}")
+                else:
+                    raise ValueError(f"未知的 LLM_PROVIDER: '{provider}'. "
+                                     f"请检查 .env 文件，应为 'dashscope' 或 'ollama'")
 
             except Exception as e:
                 logger.error(f"LLM 处理器初始化失败: {e}")
