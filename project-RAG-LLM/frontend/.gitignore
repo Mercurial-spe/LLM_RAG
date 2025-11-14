@@ -1,16 +1,26 @@
+# ==========================================
+# Frontend 特定配置
+# ==========================================
+
 # 依赖
 node_modules/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+.pnpm-store/
 
 # 构建产物
 dist/
 build/
 *.local
+.output
+dist-ssr
+.vite/
+.turbo/
 
 # 日志
 logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -24,7 +34,11 @@ lerna-debug.log*
 *.swp
 *.swo
 *~
-.DS_Store
+.sublime-project
+.sublime-workspace
+*.code-workspace
+.eslintcache
+.stylelintcache
 
 # 环境变量
 .env
@@ -37,11 +51,33 @@ lerna-debug.log*
 coverage/
 *.lcov
 .nyc_output
+.tap/
+.mocha/
 
-# 临时文件
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 临时和缓存文件
 *.tmp
 .cache/
 .temp/
+tmp/
+temp/
+*.bak
+*.backup
 
-# 操作系统文件
-Thumbs.db
+# IDE 缓存
+.eslintignore
+
+# 特定工具缓存
+.husky/
+.lint-staged.json
+
+# 开发工具
+.vercel
+.netlify

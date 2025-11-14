@@ -1,0 +1,105 @@
+# ==========================================
+# Backend 特定配置
+# ==========================================
+
+# Python 虚拟环境
+venv/
+env/
+ENV/
+.venv
+rag_llm_env/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+
+# 发行包
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# PyCharm
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# 测试
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.tox/
+coverage.xml
+.nose*
+test-results/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# 环境变量
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 数据文件（不应提交到版本控制）
+# Vector 数据库
+../data/vector_store/
+*.db
+*.sqlite
+*.sqlite3
+chat_memory.db
+
+# 原始文档
+../data/raw_documents/
+
+# 日志
+logs/
+*.log
+*.logs
+app.log
+error.log
+debug.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# 编译和临时文件
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeFiles/
+CMakeCache.txt
+
+# 备份
+*.bak
+*.backup
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 临时文件
+tmp/
+temp/
+.cache/
+*.tmp

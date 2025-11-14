@@ -1,34 +1,62 @@
-# --- General ---
-# OS-specific files
-.DS_Store
-Thumbs.db
+# ==========================================
+# 全局 .gitignore 配置
+# 涵盖整个 RAG-LLM 项目
+# ==========================================
 
-# IDE configuration files
+# ==========================================
+# 1. 操作系统文件
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ==========================================
+# 2. IDE 和编辑器配置
+# ==========================================
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+.project
+.classpath
+.c9/
+*.sublime-workspace
+*.sublime-project
+.jshintrc
+.eslintcache
+*.iml
+.eslintignore
 
-# --- Python ---
-# Virtual environments
+# ==========================================
+# 3. Python 相关
+# ==========================================
+# 虚拟环境
 venv/
 env/
+ENV/
+build/
+.venv
+rag_llm_env/
 */venv/
 */env/
 
-# Python cache and compiled files
+# Python 缓存和编译文件
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Distribution / packaging
+*.py[cod]
+*$py.class
+*.so
 .Python
-build/
-develop-eggs/
+
+# 发行包
 dist/
-downloads/
-eggs/
+build/
+*.egg-info/
 .eggs/
 lib/
 lib64/
@@ -36,54 +64,231 @@ parts/
 sdist/
 var/
 wheels/
-*.egg-info/
-.installed.cfg
+pip-wheel-metadata/
+share/python-wheels/
 *.egg
+MANIFEST
 
-# Testing
+# PyCharm
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# 测试
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.hypothesis/
+.tox/
+coverage.xml
+*.cover
+.nosetests.cfg
+.nose*
+test-results/
 
-# --- Node / Vue ---
-# Logs
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IPython
+profile_default/
+ipython_config.py
+
+# 类型检查
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ==========================================
+# 4. Node.js 和前端相关
+# ==========================================
+# 依赖
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+lerna-debug.log
+
+# 日志
 logs
-*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
+yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+.npm
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Build artifacts
-dist
+# 构建产物
+dist/
+build/
 .output
 dist-ssr
+*.local
+.vite/
 
-# Dependencies
-node_modules/
+# 缓存
+.eslintcache
+.stylelintcache
+.cache/
 
-# --- Sensitive Information (VERY IMPORTANT) ---
-# Environment variables files
+# 测试覆盖率
+coverage/
+*.lcov
+.nyc_output/
+.tap/
+.mocha/
+
+# 临时文件
+*.tmp
+.temp/
+.turbo/
+
+# ==========================================
+# 5. 环境变量和敏感信息（🔴 最重要）
+# ==========================================
+# 环境变量文件
 .env
-.env.*.local
 .env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.example
 
-# Credentials & Keys
+# 密钥和凭据（严禁上传！）
 *.pem
 *.key
+*.crt
+*.cer
 credentials.json
 secrets.yml
+secrets.yaml
+secret.txt
+api_keys.txt
+.aws/
+.ssh/
 
-# --- Project-Specific Data ---
-# Vector database generated files (can be very large)
-data/vector_store/
-# Do not commit large raw documents to the repo
-data/raw_documents/
+# ==========================================
+# 6. 项目数据和日志
+# ==========================================
 
-project-RAG-LLM/nginx*.conf
+
+# 聊天记忆和对话历史
+project-RAG-LLM/data/chat_memory/
+data/chat_memory/
+data/chat_memory/**
+*.db
+*.sqlite
+*.sqlite3
+
+# 日志文件
+logs/
+*.log
+*.logs
+app.log
+error.log
+debug.log
+
+# 输出和临时数据
+output/
+outputs/
+temp/
+tmp/
+cache/
+.cache/
+
+# ==========================================
+# 7. Docker 相关
+# ==========================================
+.dockerignore
+docker-compose.override.yml
+.docker/
+
+# ==========================================
+# 8. Nginx 配置
+# ==========================================
+# 本地 nginx 配置覆盖
+project-RAG-LLM/nginx.windows.conf
+project-RAG-LLM/nginx.local.conf
+project-RAG-LLM/nginx.dev.conf
+
+# ==========================================
+# 9. 系统和编译相关
+# ==========================================
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+CMakeFiles/
+CMakeCache.txt
+
+# ==========================================
+# 10. 备份和恢复文件
+# ==========================================
+*.bak
+*.backup
+*.swp
+*.tmp
+*~
+*.orig
+
+# ==========================================
+# 11. IDE 生成的文件
+# ==========================================
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/*.log
+.idea/
+*.code-workspace
+
+# ==========================================
+# 12. 系统特定文件
+# ==========================================
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+[Dd]esktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# Linux
+.directory
+
+# ==========================================
+# 13. 项目特定忽略（根据需要）
+# ==========================================
+# 打包和分发
+*.whl
+*.tar.gz
+*.zip
+
+# 大型数据文件
+*.tar
+*.gz
+*.rar
+*.7z
+
+# 第三方库和依赖（仅在需要时）
+# 通常应该在 requirements.txt 和 package.json 中管理
+
+# ==========================================
+# 14. 不想追踪的本地修改
+# ==========================================
+# 本地配置覆盖
+config.local.py
+config.local.json
+local_settings.py
+
+# 开发者个人文件
+.personal/
+notes.md
+my_notes.txt
