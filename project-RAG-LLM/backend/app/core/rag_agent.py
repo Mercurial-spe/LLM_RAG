@@ -152,44 +152,60 @@ def _create_dynamic_agent(
     Returns:
         配置好的 Agent 实例
     """
-    # 设置默认值
-    if temperature is None:
-        temperature = getattr(config, 'RAG_TEMPERATURE', 0.2)
-    if top_k is None:
-        top_k = config.RAG_TOP_K
-    if messages_to_keep is None:
-        messages_to_keep = config.MEMORY_MESSAGES_TO_KEEP
-    if max_tokens is None:
-        max_tokens = getattr(config, 'MEMORY_MAX_TOKENS_BEFORE_SUMMARY', 10000)
+    # --- 1. 处理动态参数，设置默认值 ---
     
-    # 1. 获取基础 LLM 并绑定动态参数
+    # LLM 参数
+    effective_temperature = temperature if temperature is not None else getattr(config, 'RAG_TEMPERATURE', 0.2)
+    
+    # Retriever 参数
+    effective_top_k = top_k if top_k is not None else config.RAG_TOP_K
+    
+    #Max Tokens 参数
+    effective_max_tokens = max_tokens if max_tokens is not None else config.LLM_MAX_TOKENS
+    
+    # Memory (Summarization) 参数
+    effective_messages_to_keep = messages_to_keep if messages_to_keep is not None else config.MEMORY_MESSAGES_TO_KEEP
+    
+    # 【修正】摘要阈值 *必须* 始终来自 config，它不是一个动态参数
+    summarization_threshold = config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY
+    
+    # --- 2. 获取基础 LLM 并绑定动态参数 ---
     base_llm = LLMHandler.get_instance().get_model()
-    llm = base_llm.bind(temperature=temperature)
     
-    # 2. 获取共享的 Checkpointer
+    # 【修正1】收集所有要绑定的 LLM 参数
+    llm_params_to_bind = {
+        "temperature": effective_temperature,
+        "max_tokens": effective_max_tokens
+    }
+
+    llm = base_llm.bind(**llm_params_to_bind)
+    
+    # --- 3. 获取共享的 Checkpointer ---
     checkpointer = _get_checkpointer()
     
-    # 3. 创建动态 Summarization Middleware
+    # --- 4. 创建动态 Summarization Middleware ---
+    # 【修正2】使用正确的配置项
     summarization_middleware = SummarizationMiddleware(
         model=llm,
-        max_tokens_before_summary=max_tokens,
-        messages_to_keep=messages_to_keep,
+        max_tokens_before_summary=summarization_threshold,  #记忆摘要阈值
+        messages_to_keep=effective_messages_to_keep,#用于控制记忆压缩后保留的消息数
     )
 
     logger.info(
         f"🔨 创建新的 Agent，session_id={session_id}, "
-        f"temperature={temperature}, top_k={top_k}, "
-        f"max_tokens={max_tokens}, "
-        f"messages_to_keep={messages_to_keep}"
+        f"temperature={effective_temperature}, top_k={effective_top_k}, "
+        f"max_generation_tokens={max_tokens}, "
+        f"summary_threshold={summarization_threshold}, "
+        f"messages_to_keep={effective_messages_to_keep}"
     )
     
-    # 4. 创建动态 Retriever
+    # --- 5. 创建动态 Retriever ---
     retriever = _create_retriever_with_filter(
         session_id=session_id,
-        top_k=top_k
+        top_k=effective_top_k
     )
     
-    # 5. 动态创建工具（通过闭包捕获当前 retriever 实例）
+    # --- 6. 动态创建工具（闭包） ---
     @tool("retrieve_context", response_format="content_and_artifact")
     def retrieve_context_filtered(query: str):
         """检索与问题相关的上下文内容（限定当前会话范围：系统文档+用户上传文档）。"""
@@ -204,7 +220,7 @@ def _create_dynamic_agent(
         )
         return serialized, docs
     
-   
+    # --- 7. System Prompt ---
     system_prompt = (
         "你是一个专业的问答助手。你有一个用于检索上下文的工具 `retrieve_context`。\n\n"
         "**核心规则**:\n"
@@ -232,11 +248,9 @@ def _create_dynamic_agent(
         "   Content: 这是第二份文档内容...\n"
         "   ```\n"
         "3. 必须使用规范的 Markdown 格式。"
-        
     )
-
     
-    # 7. 创建 Agent
+    # --- 8. 创建 Agent ---
     agent = create_agent(
         llm,
         tools=[retrieve_context_filtered],
@@ -244,10 +258,8 @@ def _create_dynamic_agent(
         checkpointer=checkpointer,
         middleware=[summarization_middleware],
     )
-    logger.info(
-        f"✅ 动态 Agent 已创建（session_id={session_id}, "
-        f"temperature={temperature}, top_k={top_k}）"
-    )
+    
+    logger.info(f"✅ 动态 Agent 已创建（session_id={session_id})")
     
     return agent
 

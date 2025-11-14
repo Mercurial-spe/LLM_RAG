@@ -42,6 +42,7 @@ LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen3-max")
 # Qwen3模型通过enable_thinking参数控制思考过程
 # 开源版默认True，商业版默认False。非流式输出时可能需要设置为False。
 LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "False").lower() == "true"
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))     # 默认8192
 
 
 # --- RAG 查询配置 ---
@@ -58,7 +59,7 @@ VECTOR_COLLECTION_NAME = "course_documents"  # 集合名称
 # 短期记忆数据库路径（SQLite）
 CHAT_MEMORY_DB_PATH = os.getenv("CHAT_MEMORY_DB_PATH", str(PROJECT_ROOT / "data" / "chat_memory" / "chat_memory.db"))
 # Summarization 触发阈值（token数）
-MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMARY", "10000"))
+MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMARY", "30000"))
 # Summarization 后保留的消息数
 MEMORY_MESSAGES_TO_KEEP = int(os.getenv("MEMORY_MESSAGES_TO_KEEP", "20"))
 
