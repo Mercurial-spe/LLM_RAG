@@ -1,21 +1,21 @@
 """
-RAG Agent 服务层
-================
+RAG Agent 服务层（重构版）
+==========================
 职责：
-- 构建并缓存 LangChain Retriever（附着到现有 Chroma 集合，仅读取）。
-- 注册检索工具并创建 Agent（create_agent）。
+- 按需创建 LangChain Retriever 和 Agent（不再使用缓存）。
+- 支持动态参数配置（temperature, top_k, messages_to_keep等）。
 - 集成短期记忆（checkpointer）和自动 Summarization。
 - 对外暴露标准调用接口：invoke（一次性）、stream_updates（步骤流）、stream_messages（仅模型文本）。
-
-用法：
-- 在 API 层调用 `stream_messages(question, thread_id="1")` 直接向前端推流模型文本；
-- 或调用 `stream_updates(question, thread_id="1")` 查看 model → tools → model 的步骤进展；
-- 或调用 `invoke(question, thread_id="1")` 获取完整回答字符串。
 
 记忆管理：
 - 使用 SQLite 数据库持久化对话历史（存储在 data/chat_memory.db）。
 - 当 token 数超过阈值时，自动触发 Summarization 压缩历史消息。
 - thread_id 用于区分不同会话，默认使用 "1"。
+
+重构改进：
+- 移除了 _retriever_cache 和 _agent_cache，解除过度耦合。
+- Agent 参数可动态传递，不再被静态配置锁定。
+- 每次请求按需创建 Agent，支持不同的 LLM 参数。
 """
 
 import logging
@@ -50,51 +50,25 @@ class LCEmbeddingAdapter(Embeddings):
 
 
 # ---------------------------- 模块级缓存 ----------------------------
-_retriever = None
-_agent = None
+# 只保留 Checkpointer 缓存（真正昂贵且共享的资源）
 _checkpointer = None
-# 为不同 session_id 缓存 retriever 和 agent
-_retriever_cache = {}  # {session_id: retriever}
-_agent_cache = {}      # {session_id: agent}
 
 
-def _get_retriever():
-    """构建或返回缓存的 LangChain Retriever（无过滤，向后兼容）。"""
-    global _retriever
-    if _retriever is not None:
-        return _retriever
-
-    embedding_service = EmbeddingService.get_instance()
-    vector_repo = VectorStoreRepository()
-    lc_embeddings = LCEmbeddingAdapter(embedding_service)
-
-    # 仅附着到本地 Chroma 集合，负责"读"
-    _retriever = vector_repo.as_langchain_retriever(
-        embedding_instance=lc_embeddings,
-        search_type="similarity",
-        search_kwargs={"k": 5},
-    )
-    logger.info("RAG retriever 已创建并缓存。")
-    return _retriever
-
-
-def _get_retriever_with_filter(session_id: str = "1"):
+def _create_retriever_with_filter(session_id: str = "1", top_k: int = None ):
     """
-    构建或返回缓存的带 session_id 过滤的 Retriever。
+    构建一个带 session_id 过滤和动态 K 值的 Retriever（按需创建，不再缓存）。
     
     Args:
         session_id: 当前会话ID，默认 "1"
+        top_k: 检索文档数量，若为 None 则使用配置文件默认值
         
     检索范围：
         - session_id = "system" 的文档（全局系统文档）
         - session_id = 当前会话ID 的文档（用户上传的文档）
     """
-    global _retriever_cache
-    
-    # 检查缓存
-    if session_id in _retriever_cache:
-        logger.info(f"✅ 使用缓存的 retriever，session_id={session_id}")
-        return _retriever_cache[session_id]
+    # 使用传入的 top_k，若未指定则使用配置文件默认值
+    if top_k is None:
+        top_k = config.RAG_TOP_K
     
     embedding_service = EmbeddingService.get_instance()
     vector_repo = VectorStoreRepository()
@@ -102,7 +76,7 @@ def _get_retriever_with_filter(session_id: str = "1"):
     
     # 构建过滤条件：检索 system 文档 + 当前会话文档
     search_kwargs = {
-        "k": 5,
+        "k": top_k,
         "filter": {
             "$or": [
                 {"session_id": "system"},      # 系统全局文档
@@ -111,30 +85,14 @@ def _get_retriever_with_filter(session_id: str = "1"):
         }
     }
     
-    logger.info(f"🔨 创建新的带过滤的 retriever，session_id={session_id}")
+    logger.info(f"🔨 创建新的 retriever，session_id={session_id}, top_k={top_k}")
     retriever = vector_repo.as_langchain_retriever(
         embedding_instance=lc_embeddings,
         search_type="similarity",
         search_kwargs=search_kwargs,
     )
     
-    # 缓存
-    _retriever_cache[session_id] = retriever
     return retriever
-
-
-@tool("retrieve_context", response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """检索与问题相关的上下文内容。返回拼接文本以及原始文档列表。"""
-    retriever = _get_retriever()
-    docs = retriever.invoke(query)
-    serialized = "\n\n".join(
-        (
-            f"Source: {d.metadata.get('source', '<unknown>')}\nContent: {d.page_content}"
-            for d in docs
-        )
-    )
-    return serialized, docs
 
 
 def _get_checkpointer():
@@ -151,31 +109,22 @@ def _get_checkpointer():
     # 尝试使用 SQLite Checkpointer（需要 langgraph-checkpoint-sqlite）
     # 如果不可用，降级到 MemorySaver（内存存储）
     try:
-        # 注意：SQLite checkpointer 可能需要额外安装 langgraph-checkpoint-sqlite
-        # 或者使用 langgraph.checkpoint.sqlite.SqliteSaver
-        # 先尝试从标准包导入
         try:
             from langgraph.checkpoint.sqlite import SqliteSaver
             import sqlite3
-            # 直接使用 sqlite3.connect，不走 from_conn_string 的上下文管理器
             conn = sqlite3.connect(config.CHAT_MEMORY_DB_PATH, check_same_thread=False)
             _checkpointer = SqliteSaver(conn)
-            # 创建表结构（若不存在）
             _checkpointer.setup()
             logger.info(f"使用 SQLite Checkpointer，数据库路径: {config.CHAT_MEMORY_DB_PATH}")
         except Exception as e:
-            # 捕获并打印详细异常，再降级到 MemorySaver
             logger.error(
                 "初始化 SqliteSaver 失败，将降级为 MemorySaver。错误: %s: %s",
                 type(e).__name__, str(e), exc_info=True
             )
             from langgraph.checkpoint.memory import MemorySaver
             _checkpointer = MemorySaver()
-            logger.warning(
-                "已切换为 MemorySaver（内存存储，重启后丢失）。"
-            )
+            logger.warning("已切换为 MemorySaver（内存存储，重启后丢失）。")
     except Exception as e:
-        # 兜底：使用 MemorySaver
         from langgraph.checkpoint.memory import MemorySaver
         _checkpointer = MemorySaver()
         logger.warning(f"初始化 Checkpointer 失败: {e}，使用 MemorySaver（内存存储）")
@@ -183,103 +132,137 @@ def _get_checkpointer():
     return _checkpointer
 
 
-def _get_agent(session_id: str = "1"):
+def _create_dynamic_agent(
+    session_id: str,
+    temperature: float = None,
+    top_k: int = None,
+    messages_to_keep: int = None,
+    max_tokens: int = None,
+):
     """
-    构建或返回缓存的 Agent（集成短期记忆和 Summarization）。
+    根据传入的动态参数，按需创建一个新的 Agent 实例（不再缓存）。
     
     Args:
         session_id: 会话ID，用于文档检索过滤
+        temperature: LLM 温度参数，若为 None 则使用配置文件默认值
+        top_k: RAG 检索的 K 值，若为 None 则使用配置文件默认值
+        messages_to_keep: 记忆压缩后保留的消息数，若为 None 则使用配置文件默认值
+        max_tokens: 最大生成token数，若为 None 则使用配置文件默认值
     
-    注意：使用缓存机制，相同 session_id 复用同一个 agent 实例
+    Returns:
+        配置好的 Agent 实例
     """
-    global _agent_cache
+    # 设置默认值
+    if temperature is None:
+        temperature = getattr(config, 'RAG_TEMPERATURE', 0.2)
+    if top_k is None:
+        top_k = config.RAG_TOP_K
+    if messages_to_keep is None:
+        messages_to_keep = config.MEMORY_MESSAGES_TO_KEEP
+    if max_tokens is None:
+        max_tokens = getattr(config, 'MEMORY_MAX_TOKENS_BEFORE_SUMMARY', 10000)
     
-    # 检查缓存
-    if session_id in _agent_cache:
-        logger.info(f"✅ 使用缓存的 agent，session_id={session_id}")
-        return _agent_cache[session_id]
+    # 1. 获取基础 LLM 并绑定动态参数
+    base_llm = LLMHandler.get_instance().get_model()
+    llm = base_llm.bind(temperature=temperature)
     
-    llm = LLMHandler.get_instance().get_model()
+    # 2. 获取共享的 Checkpointer
     checkpointer = _get_checkpointer()
     
-    # 创建 Summarization Middleware（自动压缩历史）
+    # 3. 创建动态 Summarization Middleware
     summarization_middleware = SummarizationMiddleware(
         model=llm,
-        max_tokens_before_summary=config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY,
-        messages_to_keep=config.MEMORY_MESSAGES_TO_KEEP,  
+        max_tokens_before_summary=max_tokens,
+        messages_to_keep=messages_to_keep,
     )
 
-    logger.info(f"🔨 创建新的 Agent，session_id={session_id}, max_tokens={config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY}, keep={config.MEMORY_MESSAGES_TO_KEEP}")
+    logger.info(
+        f"🔨 创建新的 Agent，session_id={session_id}, "
+        f"temperature={temperature}, top_k={top_k}, "
+        f"max_tokens={max_tokens}, "
+        f"messages_to_keep={messages_to_keep}"
+    )
     
-    # 【关键】根据 session_id 创建带过滤的 retriever（会复用缓存）
-    retriever = _get_retriever_with_filter(session_id=session_id)
+    # 4. 创建动态 Retriever
+    retriever = _create_retriever_with_filter(
+        session_id=session_id,
+        top_k=top_k
+    )
     
-    # 【关键】使用闭包创建动态工具（绑定当前 session_id 的 retriever）
+    # 5. 动态创建工具（通过闭包捕获当前 retriever 实例）
     @tool("retrieve_context", response_format="content_and_artifact")
     def retrieve_context_filtered(query: str):
         """检索与问题相关的上下文内容（限定当前会话范围：系统文档+用户上传文档）。"""
         docs = retriever.invoke(query)
         serialized = "\n\n".join(
             (
-                f"Source: {d.metadata.get('source', '<unknown>')}\n"
-                f"Session: {d.metadata.get('session_id', 'unknown')}\n"
-                f"Content: {d.page_content}"
-                for d in docs
+                f"Source: {doc.metadata.get('source', '<unknown>')}\n"
+                f"Session: {doc.metadata.get('session_id', 'unknown')}\n"
+                f"Content: {doc.page_content}"
+                for doc in docs
             )
         )
         return serialized, docs
     
+   
     system_prompt = (
-        "你有一个用于检索上下文的工具 retrieve_context。"
-        "请在需要外部知识时调用该工具，并基于返回的内容回答用户问题。"
-        "无法从上下文确定答案时请明确说明。\n\n"
-        "回答格式要求：\n"
-        "1. 使用规范的 Markdown 格式，确保段落之间有空行分隔。\n"
-        "2. 列表项前后要有空行，使用 `-` 或 `1.` 开头。\n"
-        "3. 代码块使用三个反引号包裹，并标注语言。\n"
-        "4. 长段落要适当分段，提高可读性。"
+        "你是一个专业的问答助手。你有一个用于检索上下文的工具 `retrieve_context`。\n\n"
+        "**核心规则**:\n"
+        "** 你需要判断问题是否需要外部知识，若需要，则严格遵守以下规则：** "
+        "1. 在回答前，你**必须**调用 `retrieve_context` 工具。\n"
+        "2. 你**必须只使用**该工具返回的\"上下文信息\"来回答问题。\n"
+        "3. **严禁**使用你的内部知识或个人见解来编造答案。\n"
+        "4. 如果工具返回的\"上下文信息\"不足以回答，请**直接**回复：'根据我所掌握的资料，无法回答您的问题。'\n\n"
+
+        "**引用与格式要求 **:\n"
+        "1. 若你引用了外部资料，则你的回答**必须**基于工具返回的内容 `Content`。\n"
+        "2. 在回答的**最后**，你**必须**另起一段，以 '**参考资料**' 为标题，并严格按照以下格式列出你参考的*所有*来源：\n"
+        "   ```\n"
+        "   Source: [这里填入你看到的 Source]\n"
+        "   Content: [这里填入你引用的 Content 缩写或片段。大约50字]\n"
+        "   ```\n"
+        "   例如：\n"
+        "   **参考资料**\n"
+        "   ```\n"
+        "   Source: manual.pdf\n"
+        "   Content: 这是第一份文档内容...\n"
+        "   ```\n"
+        "   ```\n"
+        "   Source: guide.txt\n"
+        "   Content: 这是第二份文档内容...\n"
+        "   ```\n"
+        "3. 必须使用规范的 Markdown 格式。"
+        
     )
+
     
+    # 7. 创建 Agent
     agent = create_agent(
         llm,
-        [retrieve_context_filtered],  # 使用带过滤的工具
+        tools=[retrieve_context_filtered],
         system_prompt=system_prompt,
         checkpointer=checkpointer,
         middleware=[summarization_middleware],
     )
-    logger.info(f"✅ RAG agent 已创建并缓存（session_id={session_id}，含短期记忆和 Summarization）")
+    logger.info(
+        f"✅ 动态 Agent 已创建（session_id={session_id}, "
+        f"temperature={temperature}, top_k={top_k}）"
+    )
     
-    # 缓存
-    _agent_cache[session_id] = agent
     return agent
 
 
-# ---------------------------- 缓存管理 ----------------------------
-def clear_cache(session_id: Optional[str] = None):
-    """
-    清理缓存。
-    
-    Args:
-        session_id: 如果指定，只清理该 session 的缓存；如果为 None，清理所有缓存
-    """
-    global _retriever_cache, _agent_cache
-    
-    if session_id is None:
-        # 清理所有缓存
-        _retriever_cache.clear()
-        _agent_cache.clear()
-        logger.info("🗑️ 已清理所有 session 的 agent 和 retriever 缓存")
-    else:
-        # 清理指定 session 的缓存
-        if session_id in _retriever_cache:
-            del _retriever_cache[session_id]
-        if session_id in _agent_cache:
-            del _agent_cache[session_id]
-        logger.info(f"🗑️ 已清理 session_id={session_id} 的 agent 和 retriever 缓存")
-
 
 # ---------------------------- 对外接口 ----------------------------
-def invoke(question: str, thread_id: str = "1", timeout_s: Optional[float] = None) -> str:
+def invoke(
+    question: str, 
+    thread_id: str = "1", 
+    timeout_s: Optional[float] = None,
+    temperature: float = None,
+    top_k: int = None,
+    messages_to_keep: int = None,
+    max_tokens: int = None
+) -> str:
     """
     一次性调用，返回完整回答文本。
     
@@ -287,12 +270,21 @@ def invoke(question: str, thread_id: str = "1", timeout_s: Optional[float] = Non
         question: 用户问题
         thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
         timeout_s: 超时时间（暂未使用）
+        temperature: LLM 温度参数
+        top_k: RAG 检索的 K 值
+        messages_to_keep: 记忆压缩后保留的消息数
+        max_tokens: 最大生成token数
     
     Returns:
         完整回答文本
     """
-    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
-    agent = _get_agent(session_id=thread_id)
+    agent = _create_dynamic_agent(
+        session_id=thread_id,
+        temperature=temperature,
+        top_k=top_k,
+        messages_to_keep=messages_to_keep,
+        max_tokens=max_tokens
+    )
     config_dict = {"configurable": {"thread_id": thread_id}}
     
     # 采用 messages 流，只拼接模型文本块
@@ -312,19 +304,32 @@ def invoke(question: str, thread_id: str = "1", timeout_s: Optional[float] = Non
     return "".join(parts)
 
 
-def stream_updates(question: str, thread_id: str = "1"):
+def stream_updates(
+    question: str, 
+    thread_id: str = "1",
+    temperature: float = None,
+    top_k: int = None,
+    messages_to_keep: int = None
+):
     """
     步骤级流（model → tools → model）。产出 dict，便于调试与观测。
     
     Args:
         question: 用户问题
         thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
+        temperature: LLM 温度参数
+        top_k: RAG 检索的 K 值
+        messages_to_keep: 记忆压缩后保留的消息数
     
     Yields:
         步骤更新字典
     """
-    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
-    agent = _get_agent(session_id=thread_id)
+    agent = _create_dynamic_agent(
+        session_id=thread_id,
+        temperature=temperature,
+        top_k=top_k,
+        messages_to_keep=messages_to_keep
+    )
     config_dict = {"configurable": {"thread_id": thread_id}}
     for chunk in agent.stream(
         {"messages": [{"role": "user", "content": question}]},
@@ -334,19 +339,35 @@ def stream_updates(question: str, thread_id: str = "1"):
         yield chunk
 
 
-def stream_messages(question: str, thread_id: str = "1"):
+def stream_messages(
+    question: str, 
+    thread_id: str = "1",
+    temperature: float = None,
+    top_k: int = None,
+    messages_to_keep: int = None,
+    max_tokens: int = None,
+):
     """
     仅流式输出模型文本块（逐段）。产出 str。
     
     Args:
         question: 用户问题
         thread_id: 对话线程ID，用于区分不同会话和文档检索范围（默认 "1"）
+        temperature: LLM 温度参数
+        top_k: RAG 检索的 K 值
+        messages_to_keep: 记忆压缩后保留的消息数
+        max_tokens: 最大生成token数
     
     Yields:
         文本块字符串
     """
-    # 【修改】传入 thread_id 作为 session_id，用于文档过滤
-    agent = _get_agent(session_id=thread_id)
+    agent = _create_dynamic_agent(
+        session_id=thread_id,
+        temperature=temperature,
+        top_k=top_k,
+        messages_to_keep=messages_to_keep,
+        max_tokens=max_tokens
+    )
     config_dict = {"configurable": {"thread_id": thread_id}}
     for token, meta in agent.stream(
         {"messages": [{"role": "user", "content": question}]},
@@ -363,5 +384,3 @@ def stream_messages(question: str, thread_id: str = "1"):
                 text = block.get("text", "")
                 if text:
                     yield text
-
-

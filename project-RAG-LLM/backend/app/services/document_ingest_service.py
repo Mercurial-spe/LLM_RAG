@@ -11,7 +11,7 @@
 
 注意：
   - 本模块不涉及任何数据库 / 向量存储操作
-  - 所有关于 embedding 或 Chroma 的逻辑应在 indexer 模块中实现
+  - 所有关于 embedding 或 Chroma 的逻辑应在其他模块中实现
 """
 
 import os
@@ -148,10 +148,11 @@ class DocumentIngestService:
                 "chunk_hash": chunk_hash, # 内容哈希，唯一内容标识
                 "chunk_size": chunk_size,
                 "embedding_model": self.embedding_model,
-                "ingested_at": ingested_at,
+                "ingested_at": ingested_at, # 摄取时间
                 "session_id": session_id,  # 会话ID，用于区分不同会话的文档
             }
 
+            #构造最终chunk字典
             processed_chunks.append({
                 "id": chunk_id_hash,
                 "content": content,

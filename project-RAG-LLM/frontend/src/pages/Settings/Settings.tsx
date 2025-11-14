@@ -1,41 +1,41 @@
 /**
  * 设置页面
  */
-import { useState } from 'react';
 import './Settings.css';
+import useSettings from '../../hooks/useSettings';
+import type { AppSettings } from '../../types';
+import { useEffect } from 'react';
 
 const Settings = () => {
-  const [settings, setSettings] = useState({
-    apiUrl: 'http://localhost:8000/api',
-    temperature: 0.7,
-    maxTokens: 2000,
-    topK: 5,
-  });
+  const { settings, updateSettings, resetSettings, isLoaded } = useSettings();
 
-  const handleChange = (key: keyof typeof settings, value: string | number) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+  // 调试日志：监听settings变化
+  useEffect(() => {
+    if (isLoaded) {
+      console.log('⚙️ 当前设置状态:', settings);
+    }
+  }, [settings, isLoaded]);
+
+  const handleChange = (key: keyof AppSettings, value: string | number) => {
+    console.log(`🔄 设置变更: ${key} = ${value}`);
+    updateSettings({ [key]: value });
   };
 
   const handleSave = () => {
-    // 保存设置到 localStorage
-    localStorage.setItem('app_settings', JSON.stringify(settings));
+    // 设置已经自动保存到 localStorage（在 useSettings 中处理）
+    console.log('✅ 设置已手动保存:', settings);
     alert('设置已保存！');
   };
 
   const handleReset = () => {
     if (!confirm('确定要重置所有设置吗？')) return;
-    
-    const defaultSettings = {
-      apiUrl: 'http://localhost:8000/api',
-      temperature: 0.7,
-      maxTokens: 2000,
-      topK: 5,
-    };
-    
-    setSettings(defaultSettings);
-    localStorage.removeItem('app_settings');
+    resetSettings();
     alert('设置已重置！');
   };
+
+  if (!isLoaded) {
+    return <div className="settings-container"><p>⏳ 加载中...</p></div>;
+  }
 
   return (
     <div className="settings-container">
@@ -103,6 +103,21 @@ const Settings = () => {
             />
             <p className="setting-description">
               检索相关文档的数量。增加此值可能提高答案质量，但会增加响应时间
+            </p>
+          </div>
+
+          <div className="setting-item">
+            <label>保留消息数</label>
+            <input
+              type="number"
+              value={settings.messagesToKeep}
+              onChange={(e) => handleChange('messagesToKeep', parseInt(e.target.value))}
+              min="10"
+              max="100"
+              step="5"
+            />
+            <p className="setting-description">
+              记忆压缩时保留的历史消息数量。较高的值保留更多上下文，但消耗更多内存
             </p>
           </div>
         </div>

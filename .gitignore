@@ -85,3 +85,5 @@ secrets.yml
 data/vector_store/
 # Do not commit large raw documents to the repo
 data/raw_documents/
+
+project-RAG-LLM/nginx*.conf

@@ -58,7 +58,7 @@ VECTOR_COLLECTION_NAME = "course_documents"  # 集合名称
 # 短期记忆数据库路径（SQLite）
 CHAT_MEMORY_DB_PATH = os.getenv("CHAT_MEMORY_DB_PATH", str(PROJECT_ROOT / "data" / "chat_memory" / "chat_memory.db"))
 # Summarization 触发阈值（token数）
-MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMARY", "4000"))
+MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMARY", "10000"))
 # Summarization 后保留的消息数
 MEMORY_MESSAGES_TO_KEEP = int(os.getenv("MEMORY_MESSAGES_TO_KEEP", "20"))
 
@@ -77,7 +77,7 @@ DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 # 监听地址配置
 # 开发环境：0.0.0.0 允许局域网访问
 # 生产环境：建议使用 localhost（仅本机访问，通过 Nginx 反向代理对外）
-HOST = os.getenv("FLASK_HOST", "0.0.0.0")
+HOST = os.getenv("FLASK_HOST", "localhost")
 PORT = int(os.getenv("FLASK_PORT", "5000"))
 
 # --- CORS 配置 ---

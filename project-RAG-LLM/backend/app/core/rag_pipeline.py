@@ -1,19 +1,19 @@
 # backend/app/core/rag_pipeline.py
 
 """
-RAG 核心编排层
+RAG 核心编排层（只是将各个服务和算法串联起来，一个无状态的 RAG 链）
 =================
 功能：
   1. 整合 EmbeddingService, VectorStoreRepository, LLMHandler。
   2. 采用 LangChain 表达式语言 (LCEL) 构建 RAG 链。
   3. 负责“检索-增强-生成”的完整流程编排。
-  4. [已更新] 提供结构化的问答结果，包含答案、来源文件、相似度和原始文本块。
+  4.  提供结构化的问答结果，包含答案、来源文件、相似度和原始文本块。
 """
 
 import logging
 from typing import List, Dict, Any, Tuple
 
-# 导入您项目已有的服务
+# 导入项目已有的服务
 from ..services.embedding_service import EmbeddingService
 from ..services.vector_store_repository import VectorStoreRepository
 from .llm_handler import LLMHandler
@@ -114,7 +114,7 @@ class RagPipeline:
 
     def _process_retrieved_docs(self, docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        [已更新] 辅助函数：
+         辅助函数：
         1. 从检索到的文档中提取来源、相似度和原始 chunk 内容。
         2. 按相似度降序排序。
         (此函数用于格式化最终返回给用户的结果)
@@ -169,7 +169,7 @@ class RagPipeline:
                 top_k=config.RAG_TOP_K
             )
             
-            # [已更新]
+            # 
             if not similar_docs:
                 logger.warning("未检索到任何相关文档。")
                 context_str = "没有找到相关上下文。"
@@ -191,7 +191,7 @@ class RagPipeline:
             logger.info("RAG 查询成功完成。")
             
             # 步骤 6: 结果封装
-            # [已更新] 返回 retrieved_chunks
+            #  返回 retrieved_chunks
             return {
                 "question": question,
                 "answer": answer.strip(),

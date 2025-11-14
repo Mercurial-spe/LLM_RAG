@@ -50,3 +50,19 @@ export interface Message {
     name: string;
     progress: number;
   }
+  
+  // RAG 配置类型
+  export interface RagConfig {
+    temperature?: number;    // LLM 温度参数 (0-2)
+    top_k?: number;          // RAG 检索的文档数量 (1-20)
+    messages_to_keep?: number; // 记忆压缩后保留的消息数 (10-100)
+  }
+  
+  // 应用设置类型
+  export interface AppSettings {
+    apiUrl: string;
+    temperature: number;
+    maxTokens: number;
+    topK: number;
+    messagesToKeep: number;
+  }

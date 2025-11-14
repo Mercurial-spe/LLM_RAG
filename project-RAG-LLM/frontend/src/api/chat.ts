@@ -44,19 +44,35 @@ const chatAPI = {
   /**
    * 以流式方式发送聊天消息（SSE over fetch）
    * 返回一个异步迭代器，逐块产出字符串内容
+   * @param message - 用户消息
+   * @param sessionId - 会话ID
+   * @param config - 可选的配置对象（支持动态参数：temperature, top_k, messages_to_keep 等）
    */
   sendMessageStream: (
     message: string,
     sessionId: string | null = null,
+    config: Record<string, any> | null = null,
   ): AsyncIterable<string> => {
     async function* iterator() {
+      const requestBody = {
+        message,
+        session_id: sessionId,
+        config: config,  // 传递配置对象
+      };
+      
+      // 【调试日志】记录发送的完整请求
+      console.log('📤 发送 /chat/stream 请求:', {
+        url: `${API_BASE_URL}/chat/stream`,
+        body: requestBody,
+      });
+      
       const response = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
         },
-        body: JSON.stringify({ message, session_id: sessionId }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok || !response.body) {
