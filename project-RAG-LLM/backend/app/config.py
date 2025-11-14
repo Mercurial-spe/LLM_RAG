@@ -14,6 +14,12 @@ _THIS_FILE = Path(__file__).resolve()
 # parents[0]=app, [1]=backend, [2]=project-RAG-LLM
 PROJECT_ROOT = _THIS_FILE.parents[2]
 
+# --- 本地的ollama模型 ---
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "dashscope").lower()
+OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3.2:1b")
+
 # --- 嵌入模型配置 (阿里云百炼 API) ---
 # 当前 嵌入和 LLM 聊天共用一个 API Key 和 Base URL
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
