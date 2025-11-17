@@ -91,10 +91,20 @@ export interface Message {
   }
   
   // 应用设置类型
-  export interface AppSettings {
+export interface AppSettings {
     apiUrl: string;
     temperature: number;
     maxTokens: number;
     topK: number;
     messagesToKeep: number;
+    voiceInputEnabled: boolean;
+    voiceAutoSend: boolean;
+    voiceReplyEnabled: boolean;
   }
+
+export interface VoiceChatResponse {
+    success: boolean;
+    session_id: string;
+    transcript: string;
+    reply?: string;
+}

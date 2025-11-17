@@ -69,6 +69,16 @@ MEMORY_MAX_TOKENS_BEFORE_SUMMARY = int(os.getenv("MEMORY_MAX_TOKENS_BEFORE_SUMMA
 # Summarization 后保留的消息数
 MEMORY_MESSAGES_TO_KEEP = int(os.getenv("MEMORY_MESSAGES_TO_KEEP", "20"))
 
+# --- 语音服务（Qwen ASR/TTS）配置 ---
+QWEN_ASR_MODEL = os.getenv("QWEN_ASR_MODEL", "qwen3-asr-flash")
+QWEN_TTS_MODEL = os.getenv("QWEN_TTS_MODEL", "qwen-tts")
+QWEN_SPEECH_VOICE = os.getenv("QWEN_SPEECH_VOICE", "Cherry")
+QWEN_SPEECH_SPEED = float(os.getenv("QWEN_SPEECH_SPEED", "1.0"))
+QWEN_SPEECH_FORMAT = os.getenv("QWEN_SPEECH_FORMAT", "wav")
+QWEN_SPEECH_SAMPLE_RATE = int(os.getenv("QWEN_SPEECH_SAMPLE_RATE", "24000"))
+QWEN_MAX_AUDIO_SECONDS = int(os.getenv("QWEN_MAX_AUDIO_SECONDS", "30"))
+QWEN_MAX_AUDIO_SIZE = int(os.getenv("QWEN_MAX_AUDIO_SIZE", str(2 * 1024 * 1024)))
+
 # --- 文档来源目录 ---
 # 默认定位到项目 data/raw_documents（绝对路径）
 RAW_DOCUMENTS_PATH = os.getenv("RAW_DOCUMENTS_PATH", str(PROJECT_ROOT / "data" / "raw_documents"))

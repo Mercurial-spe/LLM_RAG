@@ -3,7 +3,7 @@
  */
 import axios from 'axios';
 import { API_BASE_URL } from '../constants/config';
-import type { ChatResponse } from '../types';
+import type { ChatResponse, VoiceChatResponse } from '../types';
 
 const chatAPI = {
   /**
@@ -52,6 +52,7 @@ const chatAPI = {
     message: string,
     sessionId: string | null = null,
     config: Record<string, any> | null = null,
+    signal?: AbortSignal
   ): AsyncIterable<string> => {
     async function* iterator() {
       const requestBody = {
@@ -73,6 +74,7 @@ const chatAPI = {
           'Accept': 'text/event-stream',
         },
         body: JSON.stringify(requestBody),
+        signal,
       });
 
       if (!response.ok || !response.body) {
@@ -142,6 +144,58 @@ const chatAPI = {
         return iterator();
       },
     } as AsyncIterable<string>;
+  },
+
+  /**
+   * 上传语音音频并返回转写结果（可按需返回即时回答）。
+   */
+  sendVoiceMessage: async (
+    audioBlob: Blob,
+    sessionId: string | null = null,
+    config: Record<string, any> | null = null,
+    transcribeOnly = true,
+  ): Promise<VoiceChatResponse> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'voice-input.webm');
+    if (sessionId) {
+      formData.append('session_id', sessionId);
+    }
+    if (config) {
+      formData.append('config', JSON.stringify(config));
+    }
+    formData.append('transcribe_only', transcribeOnly ? 'true' : 'false');
+
+    const response = await fetch(`${API_BASE_URL}/chat/voice`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || '语音接口调用失败');
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 请求语音播报指定文本。
+   */
+  requestVoiceReply: async (text: string): Promise<Blob> => {
+    const response = await fetch(`${API_BASE_URL}/chat/voice/reply`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || '语音回复接口调用失败');
+    }
+
+    return response.blob();
   },
 };
 
