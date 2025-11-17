@@ -180,6 +180,8 @@ api_keys.txt
 project-RAG-LLM/data/chat_memory/
 data/chat_memory/
 data/chat_memory/**
+project-RAG-LLM/data/vector_store/
+project-RAG-LLM/data/upload_documents/
 *.db
 *.sqlite
 *.sqlite3
