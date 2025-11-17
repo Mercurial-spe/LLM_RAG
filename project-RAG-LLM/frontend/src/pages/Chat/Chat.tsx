@@ -123,12 +123,12 @@ const Chat = () => {
   const [uploadFileName, setUploadFileName] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { getRagConfig, isLoaded, settings } = useSettings();
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [_isRecording, setIsRecording] = useState(false);
+  const [_isTranscribing, setIsTranscribing] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [supportsRecording, setSupportsRecording] = useState(false);
-  const [pendingTranscript, setPendingTranscript] = useState('');
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [_pendingTranscript, setPendingTranscript] = useState('');
+  const [_isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
