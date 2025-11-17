@@ -21,7 +21,15 @@
 .sidebar-header h1 {
   margin: 0;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 700;
+  background: linear-gradient(135deg, #ffffff 0%, #e0e7ff 50%, #c7d2fe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.08em;
+  text-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+  position: relative;
+  display: inline-block;
 }
 
 .nav-list {
@@ -67,7 +75,47 @@
 
 .main-content {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   background: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.main-content-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  height: 0; /* 强制 flex 子元素正确计算高度 */
+}
+
+/* ============================================
+   网站底部 - 备案信息
+   ============================================ */
+.site-footer {
+  flex-shrink: 0;
+  padding: 1rem 2rem;
+  text-align: center;
+  background: white;
+  border-top: 1px solid #e2e8f0;
+  z-index: 5;
+}
+
+.icp-info {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.icp-link {
+  color: #64748b;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.icp-link:hover {
+  color: #3b82f6;
+  text-decoration: underline;
 }
 

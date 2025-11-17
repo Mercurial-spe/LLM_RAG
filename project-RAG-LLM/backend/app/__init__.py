@@ -22,7 +22,8 @@ def create_app() -> Flask:
         CORS(app, resources={
             r"/api/*": {
                 "origins": CORS_ORIGINS,  # 从环境变量读取
-                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                # 需要显式包含 PATCH，避免浏览器预检请求报错
+                "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
                 "allow_headers": ["Content-Type", "Authorization", "Accept"],
                 "expose_headers": ["Content-Type"],
                 "supports_credentials": False,

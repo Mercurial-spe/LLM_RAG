@@ -185,7 +185,6 @@ class VectorStoreRepository:
             results = self._collection.get(
                 where={"source": source}, include=["metadatas", "documents"]
             )
-            # ... (格式化并返回结果)
             documents = results.get("documents", [])
             metadatas = results.get("metadatas", [])
             formatted_results = []
@@ -194,6 +193,62 @@ class VectorStoreRepository:
             return formatted_results
         except Exception as e:
             logger.error(f"根据源文件 {source} 获取文档块失败: {e}")
+            raise
+
+    def get_documents_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        根据 session_id 聚合获取“文件级”的文档列表。
+
+        会使用 metadata 中的以下字段：
+            - source: 文件相对路径（作为 stored_path 与内部唯一 ID）
+            - file_name: 原始文件名（展示给用户）
+            - file_size: 文件大小
+            - ingested_at / file_mtime: 时间信息
+            - session_id: 会话 ID
+        """
+        try:
+            results = self._collection.get(
+                where={"session_id": session_id}, include=["metadatas"]
+            )
+            metadatas = results.get("metadatas", [])
+
+            if not metadatas:
+                return []
+
+            # 以 source 聚合到“文件级”
+            grouped: Dict[str, Dict[str, Any]] = {}
+            for meta in metadatas:
+                source = meta.get("source")
+                if not source:
+                    continue
+
+                # 如果已有记录则跳过，默认采用第一条的元数据
+                if source in grouped:
+                    continue
+
+                file_name = meta.get("file_name") or meta.get("source") or source
+                file_size = meta.get("file_size", 0)
+                uploaded_at = meta.get("ingested_at")
+                if not uploaded_at:
+                    # 回退到文件 mtime
+                    mtime = meta.get("file_mtime")
+                    if mtime is not None:
+                        # 直接使用时间戳字符串，前端可以自行格式化
+                        uploaded_at = str(mtime)
+
+                grouped[source] = {
+                    "id": source,  # 直接使用 source 作为唯一 ID，便于删除时定位
+                    "session_id": meta.get("session_id", session_id),
+                    "file_name": file_name,
+                    "stored_path": source,
+                    "size": file_size,
+                    "uploaded_at": uploaded_at,
+                    "status": "processed",
+                }
+
+            return list(grouped.values())
+        except Exception as e:
+            logger.error(f"根据 session_id={session_id} 获取文档列表失败: {e}")
             raise
 
     def get_indexed_file_state(self) -> Dict[str, Dict[str, Any]]:

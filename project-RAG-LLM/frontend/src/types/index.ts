@@ -2,8 +2,18 @@
 export interface Message {
     id: number;
     type: 'user' | 'assistant' | 'error';
+    role?: 'user' | 'assistant';  // 新增：兼容后端格式
     content: string;
-    timestamp: Date;
+    timestamp: Date | string;  // 支持字符串格式的时间戳
+  }
+  
+  // 对话相关类型
+  export interface Conversation {
+    thread_id: string;
+    title: string;
+    last_message_time: string;
+    message_count: number;
+    checkpoint_count?: number;  // 可选：checkpoint 数量
   }
   
   export interface ChatResponse {
@@ -25,9 +35,31 @@ export interface Message {
     documents: Document[];
   }
   
+  // 单次上传返回（与后端 /documents/upload 对齐）
   export interface UploadResponse {
     message: string;
-    document_id: string;
+    session_id: string;
+    filename: string;           // 存储名（带时间戳）
+    original_filename: string;  // 原始文件名（用户看到的名字）
+    size: number;
+    chunks_processed: number;
+    path: string;
+    uploaded_at: string;
+  }
+  
+  // 会话级文档（按 thread_id/session_id 聚合后的文件级信息）
+  export interface SessionDocument {
+    id: string;
+    session_id: string;
+    file_name: string;       // 原始文件名，UI 主展示字段
+    stored_path: string;     // 后端返回的路径（source）
+    size: number;
+    uploaded_at: string;
+    status?: 'processed' | 'processing';
+  }
+  
+  export interface SessionDocumentResponse {
+    documents: SessionDocument[];
   }
   
   // API 响应基础类型

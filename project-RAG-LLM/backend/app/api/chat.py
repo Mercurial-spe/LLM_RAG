@@ -2,8 +2,15 @@ from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from ..core.llm_handler import call_model_stream
 from ..core.rag_agent import stream_messages, invoke
+from ..core.conversation_manager import (
+    get_all_conversations,
+    get_conversation_messages,
+    delete_conversation,
+    update_conversation_title
+)
 from ..config import ENABLE_CORS, CORS_ORIGINS
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +57,7 @@ def chat_message_stream():
     if request.method == "OPTIONS" and ENABLE_CORS:
         response = Response()
         response.headers['Access-Control-Allow-Origin'] = CORS_ORIGINS
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, PATCH, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
         response.headers['Access-Control-Max-Age'] = '3600'
         return response
@@ -78,8 +85,13 @@ def chat_message_stream():
     logger.info(f"   - 前端传递的 config: {config_data}")
     logger.info(f"   - 最终使用的 dynamic_params: {dynamic_params}")
     
-    # 使用 session_id 作为 thread_id（如果有），否则默认 "1"
-    thread_id = session_id if session_id else "1"
+    # 要求前端必须显式传入 session_id，避免不同会话写入同一默认线程
+    if not session_id:
+        logger.warning("/chat/stream 调用缺少 session_id，拒绝请求以避免写入默认线程")
+        return jsonify({"error": "session_id 不能为空"}), 400
+
+    # 使用 session_id 作为 thread_id（与 LangGraph 的 configurable.thread_id 对齐）
+    thread_id = session_id
 
     if not user_message:
         return jsonify({"error": "message 不能为空"}), 400
@@ -111,9 +123,179 @@ def chat_message_stream():
     # 生产环境中 ENABLE_CORS=False，由 Nginx 反向代理统一处理
     if ENABLE_CORS:
         response.headers['Access-Control-Allow-Origin'] = CORS_ORIGINS
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, PATCH, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
         response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
     
     return response
+
+
+# ==================== 对话管理 API ====================
+
+@chat_bp.get("/conversations")
+def get_conversations():
+    """
+    获取所有对话列表
+    
+    Returns:
+        对话列表，包含 thread_id、title、last_message_time、message_count
+    """
+    try:
+        conversations = get_all_conversations()
+        return jsonify({
+            "success": True,
+            "conversations": conversations
+        })
+    except Exception as e:
+        logger.error(f"获取对话列表失败: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@chat_bp.get("/conversations/<string:thread_id>/messages")
+def get_conversation_messages_api(thread_id: str):
+    """
+    获取指定对话的完整消息历史
+    
+    Args:
+        thread_id: 对话 ID
+        
+    Returns:
+        包含 thread_id 和 messages 列表的字典
+    """
+    try:
+        result = get_conversation_messages(thread_id)
+        return jsonify({
+            "success": True,
+            **result
+        })
+    except Exception as e:
+        logger.error(f"获取对话消息失败: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "thread_id": thread_id,
+            "messages": []
+        }), 500
+
+
+@chat_bp.post("/conversations")
+def create_conversation():
+    """
+    创建新对话
+    
+    Returns:
+        新对话的 thread_id、title、created_at
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        title = data.get("title", "新对话")
+        
+        # 生成新的 UUID 作为 thread_id
+        new_thread_id = str(uuid.uuid4())
+        
+        from datetime import datetime
+        created_at = datetime.now().isoformat()
+        
+        logger.info(f"创建新对话: {new_thread_id}")
+        
+        return jsonify({
+            "success": True,
+            "thread_id": new_thread_id,
+            "title": title,
+            "created_at": created_at
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"创建对话失败: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@chat_bp.delete("/conversations/<string:thread_id>")
+def delete_conversation_api(thread_id: str):
+    """
+    删除指定对话
+    
+    Args:
+        thread_id: 对话 ID
+        
+    Returns:
+        删除结果
+    """
+    try:
+        success = delete_conversation(thread_id)
+        
+        if success:
+            logger.info(f"删除对话成功: {thread_id}")
+            return jsonify({
+                "success": True,
+                "message": "对话删除成功"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "对话不存在或删除失败"
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"删除对话失败: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@chat_bp.patch("/conversations/<string:thread_id>")
+def update_conversation_api(thread_id: str):
+    """
+    更新对话信息（如标题）
+    
+    Args:
+        thread_id: 对话 ID
+        
+    Request Body:
+        {
+            "title": "新标题"
+        }
+        
+    Returns:
+        更新结果
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        title = data.get("title", "").strip()
+        
+        if not title:
+            return jsonify({
+                "success": False,
+                "error": "标题不能为空"
+            }), 400
+        
+        success = update_conversation_title(thread_id, title)
+        
+        if success:
+            logger.info(f"更新对话标题成功: {thread_id} -> {title}")
+            return jsonify({
+                "success": True,
+                "message": "标题更新成功",
+                "thread_id": thread_id,
+                "title": title
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "对话不存在或更新失败"
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"更新对话标题失败: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 

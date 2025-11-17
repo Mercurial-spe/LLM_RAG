@@ -1,7 +1,23 @@
+/* ============================================
+   文档管理页面 - 现代化设计
+   ============================================ */
+
 .documents-container {
   padding: 2rem;
   max-width: 1400px;
   margin: 0 auto;
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .documents-header {
@@ -9,40 +25,94 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+  animation: fadeInUp 0.6s ease-out 0.1s both;
 }
 
 .documents-header h2 {
   margin: 0;
-  color: #1e293b;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 0 3px 18px rgba(59, 130, 246, 0.3);
+  position: relative;
+  display: inline-block;
 }
 
 .upload-button {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  background: #2563eb;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s;
 }
 
 .upload-button:hover {
-  background: #1d4ed8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.upload-button:hover::before {
+  left: 100%;
+}
+
+.upload-button:active {
+  transform: translateY(0);
+}
+
+.upload-button input[type="file"] {
+  display: none;
 }
 
 .upload-progress {
   background: white;
   padding: 1rem 1.5rem;
-  border-radius: 8px;
+  border-radius: 12px;
   margin-bottom: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e2e8f0;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .upload-progress p {
   margin: 0 0 0.5rem 0;
   color: #475569;
+  font-weight: 500;
 }
 
 .progress-bar {
@@ -54,12 +124,120 @@
 
 .progress-fill {
   height: 100%;
-  background: #2563eb;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
   transition: width 0.3s ease;
+  border-radius: 4px;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
 }
 
 .documents-content {
   min-height: 400px;
+}
+
+.documents-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 1.5rem;
+  animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+.documents-conversation-list {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 0.75rem;
+  max-height: 520px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+}
+
+.documents-conversation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.documents-conversation-list::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.documents-conversation-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.documents-conversation-list::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.documents-conversation-item {
+  padding: 0.75rem;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+}
+
+.documents-conversation-item:hover {
+  background: #f8fafc;
+  transform: translateX(4px);
+  border-color: #e2e8f0;
+}
+
+.documents-conversation-item.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+.documents-conversation-item.active .documents-conversation-meta {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.documents-conversation-title {
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.documents-conversation-meta {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.documents-session-content {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 1.25rem 1.5rem;
+  min-height: 360px;
+  border: 1px solid #e2e8f0;
+}
+
+.documents-session-header h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.05rem;
+  color: #1f2933;
+  font-weight: 600;
+}
+
+.documents-session-thread-id {
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-family: 'Consolas', 'Monaco', monospace;
 }
 
 .loading,
@@ -87,22 +265,56 @@
   background: white;
   padding: 1.5rem;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: flex-start;
   gap: 1rem;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  border: 1px solid #e2e8f0;
+  animation: fadeInUp 0.5s ease-out both;
+}
+
+.document-card:nth-child(1) { animation-delay: 0.1s; }
+.document-card:nth-child(2) { animation-delay: 0.2s; }
+.document-card:nth-child(3) { animation-delay: 0.3s; }
+.document-card:nth-child(4) { animation-delay: 0.4s; }
+.document-card:nth-child(5) { animation-delay: 0.5s; }
+.document-card:nth-child(6) { animation-delay: 0.6s; }
+
+.document-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  border-radius: 12px 12px 0 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s;
+}
+
+.document-card:hover::before {
+  transform: scaleX(1);
 }
 
 .document-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+  border-color: #3b82f6;
 }
 
 .document-icon {
   font-size: 2.5rem;
   flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  transition: transform 0.3s;
+}
+
+.document-card:hover .document-icon {
+  transform: scale(1.1) rotate(5deg);
 }
 
 .document-info {
@@ -114,6 +326,7 @@
   margin: 0 0 0.5rem 0;
   color: #1e293b;
   font-size: 1rem;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -125,6 +338,7 @@
   color: #64748b;
   font-size: 0.875rem;
   margin: 0 0 0.5rem 0;
+  flex-wrap: wrap;
 }
 
 .status-badge {
@@ -133,6 +347,11 @@
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 500;
+  transition: transform 0.2s;
+}
+
+.status-badge:hover {
+  transform: scale(1.05);
 }
 
 .status-badge.processed {
@@ -143,6 +362,16 @@
 .status-badge.processing {
   background: #fef3c7;
   color: #92400e;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .delete-button {
@@ -151,11 +380,42 @@
   font-size: 1.25rem;
   cursor: pointer;
   padding: 0.5rem;
-  opacity: 0.6;
-  transition: opacity 0.2s;
+  opacity: 0.5;
+  transition: all 0.3s;
+  border-radius: 6px;
+  color: #64748b;
 }
 
 .delete-button:hover {
   opacity: 1;
+  background: #fef2f2;
+  color: #dc2626;
+  transform: scale(1.1);
 }
 
+/* 响应式设计 */
+@media (max-width: 1024px) {
+  .documents-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .documents-conversation-list {
+    max-height: 200px;
+  }
+}
+
+@media (max-width: 768px) {
+  .documents-container {
+    padding: 1.5rem;
+  }
+
+  .documents-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .documents-grid {
+    grid-template-columns: 1fr;
+  }
+}

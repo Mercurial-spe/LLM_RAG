@@ -10,16 +10,15 @@ const Layout = ():  React.JSX.Element => {
 
   const navItems: NavItem[] = [
     { path: '/', label: '首页', icon: '🏠' },
-    { path: '/chat', label: '对话', icon: '💬' },
+    { path: '/chat', label: 'SCUT 计算机网络助手', icon: '💬' },
     { path: '/documents', label: '文档管理', icon: '📄' },
-    { path: '/settings', label: '设置', icon: '⚙️' },
   ];
 
   return (
     <div className="layout">
       <nav className="sidebar">
         <div className="sidebar-header">
-          <h1>RAG-LLM</h1>
+          <h1>以太寻光</h1>
         </div>
         <ul className="nav-list">
           {navItems.map((item) => (
@@ -35,8 +34,23 @@ const Layout = ():  React.JSX.Element => {
           ))}
         </ul>
       </nav>
+
       <main className="main-content">
-        <Outlet />
+        <div className="main-content-wrapper">
+          <Outlet />
+        </div>
+        <footer className="site-footer">
+          <p className="icp-info">
+            <a 
+              href="https://beian.miit.gov.cn/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="icp-link"
+            >
+              黔ICP备2025060353号
+            </a>
+          </p>
+        </footer>
       </main>
     </div>
   );

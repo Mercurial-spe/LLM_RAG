@@ -6,7 +6,6 @@ import Layout from '../components/layout/Layout';
 import Home from '../pages/Home/Home';
 import Chat from '../pages/Chat/Chat';
 import Documents from '../pages/Documents/Documents';
-import Settings from '../pages/Settings/Settings';
 
 const router = createBrowserRouter([
   {
@@ -24,10 +23,6 @@ const router = createBrowserRouter([
       {
         path: 'documents',
         element: <Documents />,
-      },
-      {
-        path: 'settings',
-        element: <Settings />,
       },
     ],
   },

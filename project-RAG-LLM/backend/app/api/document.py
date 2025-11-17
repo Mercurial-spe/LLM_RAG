@@ -194,6 +194,23 @@ def get_documents():
         }), 500
 
 
+@document_bp.get("/documents/session/<string:session_id>")
+def get_session_documents(session_id: str):
+    """
+    根据 session_id 获取该会话下已上传的文档列表（文件级）。
+    数据来源：向量库中的 metadata（按 source 聚合）。
+    """
+    try:
+        vector_repo = VectorStoreRepository()
+        documents = vector_repo.get_documents_by_session(session_id=session_id)
+        return jsonify({"documents": documents}), 200
+    except Exception as e:
+        logger.error(f"获取会话文档列表失败: {e}", exc_info=True)
+        return jsonify({
+            "error": f"获取会话文档列表失败: {str(e)}"
+        }), 500
+
+
 @document_bp.delete("/documents/<string:document_id>")
 def delete_document(document_id: str):
     """
@@ -202,17 +219,29 @@ def delete_document(document_id: str):
     try:
         # 查找匹配的文件（document_id 是文件名不含扩展名的部分）
         deleted = False
+        source_path = None
         for file_path in UPLOAD_FOLDER.iterdir():
             if file_path.is_file() and file_path.stem == document_id:
+                # 记录相对路径以便从向量库中删除
+                from ..config import PROJECT_ROOT as _PROJECT_ROOT
+                source_path = str(file_path.relative_to(_PROJECT_ROOT))
                 os.remove(file_path)
                 deleted = True
                 break
-        
+
+        # 同步删除向量库中的相关记录
+        if source_path is not None:
+            try:
+                vector_repo = VectorStoreRepository()
+                vector_repo.delete_by_source(source_path)
+            except Exception as ve:
+                logger.error(f"删除向量库中文档失败 (source={source_path}): {ve}", exc_info=True)
+
         if deleted:
             return jsonify({"message": "文档删除成功"}), 200
         else:
             return jsonify({"error": "文档不存在"}), 404
-            
+
     except Exception as e:
         return jsonify({
             "error": f"删除文档失败: {str(e)}"

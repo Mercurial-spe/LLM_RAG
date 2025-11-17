@@ -7,4 +7,4 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host=HOST, port=PORT, debug=DEBUG, use_reloader=False)
+    app.run(host=HOST, port=PORT, debug=DEBUG)
