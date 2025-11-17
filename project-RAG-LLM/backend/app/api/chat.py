@@ -9,8 +9,15 @@ from ..core.conversation_manager import (
     update_conversation_title
 )
 from ..config import ENABLE_CORS, CORS_ORIGINS
+from .. import config as app_config_module
+from ..services.speech_service import (
+    transcribe_audio,
+    synthesize_audio,
+    SpeechServiceError,
+)
 import logging
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +68,7 @@ def chat_message_stream():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
         response.headers['Access-Control-Max-Age'] = '3600'
         return response
-    
-    import json
-    
+        
     data = request.get_json(silent=True) or {}
     user_message = (data.get("message") or "").strip()
     session_id = data.get("session_id")
@@ -127,6 +132,99 @@ def chat_message_stream():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
         response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
     
+    return response
+
+
+# ====================
+# 语音聊天相关接口
+# ====================
+@chat_bp.post("/chat/voice")
+def chat_voice():
+    """
+    接收前端上传的音频文件，调用 Qwen ASR + RAG 返回文本回答。
+    """
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return jsonify({"success": False, "error": "audio 文件不能为空"}), 400
+
+    config_raw = request.form.get("config")
+    transcribe_only_flag = (request.form.get("transcribe_only", "false") or "false").lower()
+    transcribe_only = transcribe_only_flag in {"true", "1", "yes"}
+    session_id = request.form.get("session_id")
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        logger.info("语音接口未提供 session_id，自动创建: %s", session_id)
+
+    config_data = {}
+    if config_raw:
+        try:
+            config_data = json.loads(config_raw)
+        except json.JSONDecodeError:
+            logger.warning("语音接口 config 字段解析失败，原始值: %s", config_raw)
+
+    from .. import config as app_config
+    dynamic_params = {
+        "temperature": config_data.get("temperature", getattr(app_config, 'RAG_TEMPERATURE', 0.2)),
+        "top_k": config_data.get("top_k", app_config.RAG_TOP_K),
+        "messages_to_keep": config_data.get("messages_to_keep", app_config.MEMORY_MESSAGES_TO_KEEP)
+    }
+
+    try:
+        transcript = transcribe_audio(audio_file)
+        logger.info("语音识别结果: %s", transcript)
+    except SpeechServiceError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        logger.error("语音识别出现未预期错误: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "语音识别失败"}), 500
+
+    reply_text = ""
+    if not transcribe_only:
+        try:
+            reply_text = invoke(
+                transcript,
+                thread_id=session_id,
+                temperature=dynamic_params["temperature"],
+                top_k=dynamic_params["top_k"],
+                messages_to_keep=dynamic_params["messages_to_keep"],
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.error("语音问答失败: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "生成回复失败"}), 500
+
+    return jsonify({
+        "success": True,
+        "session_id": session_id,
+        "transcript": transcript,
+        "reply": reply_text,
+    })
+
+
+@chat_bp.post("/chat/voice/reply")
+def chat_voice_reply():
+    """
+    将文本回答转换为语音音频返回前端。
+    """
+    data = request.get_json(silent=True) or {}
+    reply_text = (data.get("text") or "").strip()
+
+    if not reply_text:
+        return jsonify({"success": False, "error": "text 字段不能为空"}), 400
+
+    try:
+        audio_bytes = synthesize_audio(reply_text)
+    except SpeechServiceError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        logger.error("语音合成失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "语音合成失败"}), 500
+
+    response = Response(audio_bytes, mimetype=f"audio/{app_config_module.QWEN_SPEECH_FORMAT}")
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['Content-Disposition'] = f"inline; filename=reply.{app_config_module.QWEN_SPEECH_FORMAT}"
+    if ENABLE_CORS:
+        response.headers['Access-Control-Allow-Origin'] = CORS_ORIGINS
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
     return response
 
 
@@ -298,4 +396,3 @@ def update_conversation_api(thread_id: str):
             "success": False,
             "error": str(e)
         }), 500
-

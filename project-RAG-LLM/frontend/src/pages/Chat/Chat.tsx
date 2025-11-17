@@ -75,11 +75,46 @@ const ChatSettings = () => {
               onChange={(e) => handleQuickUpdate('messagesToKeep', parseInt(e.target.value))}
             />
           </div>
+
+          <div className="setting-group checkbox-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.voiceInputEnabled}
+                onChange={(e) => handleQuickUpdate('voiceInputEnabled', e.target.checked)}
+              />
+              启用语音输入
+            </label>
+          </div>
+
+          <div className="setting-group checkbox-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.voiceAutoSend}
+                onChange={(e) => handleQuickUpdate('voiceAutoSend', e.target.checked)}
+              />
+              语音识别后自动发送
+            </label>
+          </div>
+
+          <div className="setting-group checkbox-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.voiceReplyEnabled}
+                onChange={(e) => handleQuickUpdate('voiceReplyEnabled', e.target.checked)}
+              />
+              启用语音播报
+            </label>
+          </div>
         </div>
       )}
     </div>
   );
 };
+
+type VoiceProcess = 'idle' | 'recording' | 'transcribing' | 'thinking' | 'speaking';
 
 const Chat = () => {
   const [input, setInput] = useState<string>('');
@@ -87,7 +122,29 @@ const Chat = () => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadFileName, setUploadFileName] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const { getRagConfig, isLoaded } = useSettings();
+  const { getRagConfig, isLoaded, settings } = useSettings();
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [supportsRecording, setSupportsRecording] = useState(false);
+  const [pendingTranscript, setPendingTranscript] = useState('');
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const [lastVoiceMessageId, setLastVoiceMessageId] = useState<number | null>(null);
+  const [voiceProcess, setVoiceProcess] = useState<VoiceProcess>('idle');
+  const voiceStreamAbortRef = useRef<AbortController | null>(null);
+  const [voiceFlowActive, setVoiceFlowActive] = useState(false);
+  const voiceStatusText: Record<VoiceProcess, string> = {
+    idle: '语音助手待命',
+    recording: '录音中...',
+    transcribing: '正在识别语音...',
+    thinking: '正在思考...',
+    speaking: '正在播报...',
+  };
   
   // 使用 Zustand store 管理对话状态
   const {
@@ -108,9 +165,43 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const resolveThreadId = async (): Promise<string> => {
+    let targetThreadId = useConversationStore.getState().currentThreadId;
+    if (!targetThreadId) {
+      console.warn('⚠️ 没有当前对话，尝试创建新对话...');
+      const newId = await createNewConversation('新对话');
+      if (!newId) {
+        throw new Error('创建新对话失败，无法发送消息');
+      }
+      targetThreadId = newId;
+    }
+    return targetThreadId;
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [currentMessages]);
+
+  useEffect(() => {
+    const available =
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      Boolean(navigator.mediaDevices?.getUserMedia) &&
+      typeof MediaRecorder !== 'undefined';
+    setSupportsRecording(available);
+  }, []);
+  
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, []);
   
   // 初始化：加载对话列表
   useEffect(() => {
@@ -201,38 +292,44 @@ const Chat = () => {
     event.target.value = '';
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading || !isLoaded) {
+  const handleSend = async (
+    overrideText?: string,
+    options?: {
+      signal?: AbortSignal;
+      voiceFlow?: boolean;
+    }
+  ) => {
+    const textToSend = (overrideText ?? input).trim();
+    if (!textToSend || isLoading || !isLoaded) {
       return;
     }
 
-    // 确保一定有一个可用的 threadId；如果没有则先创建
-    let targetThreadId = currentThreadId;
-    if (!targetThreadId) {
-      console.warn('⚠️ 没有当前对话，尝试创建新对话...');
-      const newId = await createNewConversation('新对话');
-      if (!newId) {
-        console.error('❌ 创建新对话失败，无法发送消息');
-        return;
-      }
-      targetThreadId = newId;
+    let targetThreadId: string;
+    try {
+      targetThreadId = await resolveThreadId();
+    } catch (error) {
+      console.error('❌ 创建对话失败:', error);
+      setRecordingError('创建对话失败，请稍后再试');
+      return;
     }
 
     const userMessage: Message = {
       id: Date.now(),
       type: 'user',
       role: 'user',
-      content: input,
+      content: textToSend,
       timestamp: new Date(),
     };
 
-    // 添加到 store
     addMessage(userMessage);
     setInput('');
+    setPendingTranscript('');
+    if (options?.voiceFlow) {
+      setVoiceFlowActive(true);
+    }
     setIsLoading(true);
 
     try {
-      // 先插入一个空的助手消息，占位并逐步填充
       const assistantId = Date.now() + 1;
       const assistantMessage: Message = {
         id: assistantId,
@@ -243,35 +340,279 @@ const Chat = () => {
       };
       addMessage(assistantMessage);
 
-      // 获取当前 RAG 配置并使用流式接口逐块更新内容
       const ragConfig = getRagConfig();
       console.log('📤 发送消息到对话:', targetThreadId);
       console.log('📤 RAG配置:', ragConfig);
-      
-      // 使用当前 threadId 发送消息
+
+      let assistantReply = '';
       for await (const chunk of chatAPI.sendMessageStream(
-        userMessage.content, 
-        targetThreadId,  // 使用当前对话 ID
-        ragConfig
+        textToSend,
+        targetThreadId,
+        ragConfig,
+        options?.signal
       )) {
-        // 追加消息内容（使用 appendToMessage 避免状态不同步问题）
         appendToMessage(assistantId, chunk);
+        assistantReply += chunk;
       }
-      
-      // 重新加载对话列表以更新时间和消息数
+
       await loadConversations();
-      
+
+      if (settings.voiceReplyEnabled && assistantReply.trim()) {
+        await playVoiceReply(assistantReply.trim(), assistantId);
+      }
     } catch (error) {
-      console.error('❌ 发送消息错误:', error);
-      const errorMessage: Message = {
-        id: Date.now() + 2,
-        type: 'error',
-        content: '抱歉，发送消息时出现错误，请稍后再试。',
-        timestamp: new Date(),
-      };
-      addMessage(errorMessage);
+      if ((error as DOMException)?.name === 'AbortError') {
+        console.warn('语音流已取消');
+      } else {
+        console.error('❌ 发送消息错误:', error);
+        const errorMessage: Message = {
+          id: Date.now() + 2,
+          type: 'error',
+          content: '抱歉，发送消息时出现错误，请稍后再试。',
+          timestamp: new Date(),
+        };
+        addMessage(errorMessage);
+      }
+      if (options?.voiceFlow) {
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+      }
     } finally {
       setIsLoading(false);
+      if (options?.voiceFlow && (!settings.voiceReplyEnabled || !voiceFlowActive)) {
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+      }
+    }
+  };
+
+  const handleStopPlayback = () => {
+    const audioElement = audioPlayerRef.current;
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.currentTime = 0;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setIsSpeaking(false);
+    if (voiceFlowActive) {
+      setVoiceProcess('idle');
+      setVoiceFlowActive(false);
+    }
+  };
+
+  const playVoiceReply = async (text: string, messageId: number) => {
+    if (!settings.voiceReplyEnabled || !text.trim()) {
+      return;
+    }
+    setIsGeneratingAudio(true);
+    setRecordingError(null);
+
+    try {
+      const audioBlob = await chatAPI.requestVoiceReply(text);
+      handleStopPlayback();
+
+      const url = URL.createObjectURL(audioBlob);
+      audioUrlRef.current = url;
+
+      const audioElement = audioPlayerRef.current;
+      if (!audioElement) {
+        console.warn('音频元素尚未就绪，无法播放 TTS');
+        return;
+      }
+
+      audioElement.src = url;
+      audioElement.onended = () => {
+        setIsSpeaking(false);
+        if (voiceFlowActive) {
+          setVoiceProcess('idle');
+          setVoiceFlowActive(false);
+        }
+      };
+      if (voiceFlowActive) {
+        setVoiceProcess('speaking');
+      }
+      await audioElement.play();
+      setIsSpeaking(true);
+      setLastVoiceMessageId(messageId);
+    } catch (error) {
+      console.error('语音播报失败:', error);
+      setRecordingError('语音播报失败，请稍后再试');
+      if (voiceFlowActive) {
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+      }
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  const handleVoiceUpload = async (audioBlob: Blob) => {
+    if (!settings.voiceInputEnabled) {
+      setRecordingError('已关闭语音输入，请在设置中开启');
+      return;
+    }
+    if (audioBlob.size === 0) {
+      setRecordingError('未检测到有效音频，请重试');
+      return;
+    }
+
+    setIsTranscribing(true);
+    setRecordingError(null);
+    setVoiceProcess('transcribing');
+    try {
+      const ragConfig = getRagConfig();
+      const response = await chatAPI.sendVoiceMessage(
+        audioBlob,
+        useConversationStore.getState().currentThreadId,
+        ragConfig,
+        true
+      );
+      const transcript = response?.transcript?.trim();
+      if (!transcript) {
+        setRecordingError('语音识别失败，请重试');
+        setVoiceProcess('idle');
+        return;
+      }
+      setPendingTranscript(transcript);
+      setInput(transcript);
+      if (settings.voiceAutoSend) {
+        await handleVoiceSend(transcript);
+        setPendingTranscript('');
+      } else {
+        setVoiceProcess('idle');
+      }
+    } catch (error) {
+      console.error('语音识别失败:', error);
+      setRecordingError('语音识别失败，请检查网络或权限');
+      setVoiceProcess('idle');
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleVoiceSend = async (transcript: string) => {
+    const controller = new AbortController();
+    voiceStreamAbortRef.current = controller;
+    setVoiceFlowActive(true);
+    setVoiceProcess('thinking');
+    try {
+      await handleSend(transcript, {
+        signal: controller.signal,
+        voiceFlow: true,
+      });
+    } catch (error) {
+      console.error('❌ 语音发送失败:', error);
+      setRecordingError('语音消息发送失败');
+      setVoiceProcess('idle');
+      setVoiceFlowActive(false);
+    } finally {
+      voiceStreamAbortRef.current = null;
+      if (!settings.voiceReplyEnabled) {
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+      }
+    }
+  };
+
+  const handleVoiceButtonClick = () => {
+    switch (voiceProcess) {
+      case 'idle':
+        if (!supportsRecording) {
+          setRecordingError('当前浏览器不支持语音输入');
+          return;
+        }
+        startRecording();
+        break;
+      case 'recording':
+        stopRecording();
+        break;
+      case 'transcribing':
+        setIsTranscribing(false);
+        setVoiceProcess('idle');
+        setRecordingError('已取消语音识别');
+        break;
+      case 'thinking':
+        voiceStreamAbortRef.current?.abort();
+        voiceStreamAbortRef.current = null;
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+        setRecordingError('已终止生成');
+        break;
+      case 'speaking':
+        handleStopPlayback();
+        setVoiceProcess('idle');
+        setVoiceFlowActive(false);
+        setRecordingError('已停止播报');
+        break;
+    }
+  };
+
+  const startRecording = async () => {
+    if (!settings.voiceInputEnabled) {
+      setRecordingError('请先启用语音输入');
+      return;
+    }
+    if (!supportsRecording) {
+      setRecordingError('当前浏览器不支持语音输入');
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setRecordingError('当前环境无法访问麦克风');
+      return;
+    }
+
+    try {
+      setRecordingError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = (event) => {
+        console.error('录音发生错误:', event.error);
+        setRecordingError(`录音失败：${event.error?.message ?? ''}`);
+        setIsRecording(false);
+        setVoiceProcess('idle');
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        setIsRecording(false);
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        audioChunksRef.current = [];
+        if (audioBlob.size > 0) {
+          setVoiceProcess('transcribing');
+          await handleVoiceUpload(audioBlob);
+        } else {
+          setVoiceProcess('idle');
+        }
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setVoiceProcess('recording');
+      setVoiceFlowActive(false);
+    } catch (error) {
+      console.error('无法访问麦克风:', error);
+      setRecordingError('无法访问麦克风，请检查设备权限');
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
     }
   };
 
@@ -422,14 +763,41 @@ const Chat = () => {
             rows={3}
             disabled={isLoading}
           />
-          <button onClick={handleSend} disabled={!input.trim() || isLoading}>
+          <button
+            className={`voice-toggle ${voiceProcess !== 'idle' ? 'active' : ''}`}
+            onClick={handleVoiceButtonClick}
+            disabled={
+              voiceProcess === 'idle'
+                ? (!supportsRecording || !settings.voiceInputEnabled)
+                : false
+            }
+            title={!supportsRecording ? '当前浏览器不支持语音输入' : undefined}
+          >
+            {voiceProcess === 'recording'
+              ? '结束录音'
+              : voiceProcess === 'idle'
+              ? '语音'
+              : '停止'}
+          </button>
+          <button onClick={() => handleSend()} disabled={!input.trim() || isLoading}>
             {isLoading ? '发送中...' : '发送'}
           </button>
         </div>
+        {(voiceProcess !== 'idle' || recordingError) && (
+          <div className="voice-status-line">
+            {voiceProcess !== 'idle' && (
+              <span className="voice-status-text">{voiceStatusText[voiceProcess]}</span>
+            )}
+            {recordingError && <span className="voice-error-inline">{recordingError}</span>}
+            {lastVoiceMessageId && isSpeaking && (
+              <span className="voice-status-text">播报消息 #{lastVoiceMessageId}</span>
+            )}
+          </div>
+        )}
+        <audio ref={audioPlayerRef} style={{ display: 'none' }} />
       </div>
     </div>
   );
 };
 
 export default Chat;
-

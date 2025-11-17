@@ -11,6 +11,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   maxTokens: 2000,
   topK: 5,
   messagesToKeep: 20,
+  voiceInputEnabled: true,
+  voiceAutoSend: true,
+  voiceReplyEnabled: true,
 };
 
 const useSettings = () => {
