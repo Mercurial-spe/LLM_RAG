@@ -76,9 +76,10 @@ QWEN_SPEECH_VOICE = os.getenv("QWEN_SPEECH_VOICE", "Cherry")
 QWEN_SPEECH_SPEED = float(os.getenv("QWEN_SPEECH_SPEED", "1.0"))
 QWEN_SPEECH_FORMAT = os.getenv("QWEN_SPEECH_FORMAT", "wav")
 QWEN_SPEECH_SAMPLE_RATE = int(os.getenv("QWEN_SPEECH_SAMPLE_RATE", "24000"))
+QWEN_TTS_TOKEN_LIMIT = int(os.getenv("QWEN_TTS_TOKEN_LIMIT", "512"))
 QWEN_MAX_AUDIO_SECONDS = int(os.getenv("QWEN_MAX_AUDIO_SECONDS", "30"))
 QWEN_MAX_AUDIO_SIZE = int(os.getenv("QWEN_MAX_AUDIO_SIZE", str(2 * 1024 * 1024)))
-
+TIKTOKEN_CACHE_DIR =  str(PROJECT_ROOT / "data")
 # --- 文档来源目录 ---
 # 默认定位到项目 data/raw_documents（绝对路径）
 RAW_DOCUMENTS_PATH = os.getenv("RAW_DOCUMENTS_PATH", str(PROJECT_ROOT / "data" / "raw_documents"))

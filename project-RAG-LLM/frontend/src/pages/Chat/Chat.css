@@ -628,12 +628,56 @@
 .message-time {
   font-size: 0.75rem;
   color: #94a3b8;
-  display: block;
-  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0;
 }
 
 .message.user .message-time {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.tts-play-button {
+  border: none;
+  background: #eef2ff;
+  color: #4f46e5;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15);
+}
+
+.tts-play-button:hover:not(:disabled) {
+  background: #6366f1;
+  color: white;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+.tts-play-button.playing {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+}
+
+.tts-play-button:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.85;
 }
 
 /* ============================================

@@ -396,3 +396,4 @@ def update_conversation_api(thread_id: str):
             "success": False,
             "error": str(e)
         }), 500
+    

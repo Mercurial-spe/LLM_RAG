@@ -1,13 +1,20 @@
 from __future__ import annotations
-
+import os
 import base64
+import contextlib
 import io
 import logging
-from typing import Optional, Any
+import wave
+from typing import Optional, Any, List
 
 import httpx
 from dashscope.audio.qwen_tts import SpeechSynthesizer
 from werkzeug.datastructures import FileStorage
+
+try:
+    import tiktoken  # type: ignore
+except Exception:  # pragma: no cover
+    tiktoken = None
 
 from .. import config
 
@@ -15,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 ASR_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 DOWNLOAD_TIMEOUT = 60
+
+tiktoken_cache_dir = config.TIKTOKEN_CACHE_DIR
+os.environ["TIKTOKEN_CACHE_DIR"] = tiktoken_cache_dir
+_tiktoken_encoding = None
 
 
 class SpeechServiceError(RuntimeError):
@@ -122,6 +133,53 @@ def _extract_transcript_from_data(data: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _get_tokenizer():
+    """Lazy-load tokenizer for token-accurate splitting."""
+    global _tiktoken_encoding
+    if tiktoken is None:
+        return None
+    if _tiktoken_encoding is None:
+        try:
+            _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("加载 tiktoken 编码器失败，退回字符切分: %s", exc)
+            _tiktoken_encoding = None
+    return _tiktoken_encoding
+
+
+def _chunk_text_for_tts(text: str, max_tokens: int) -> list[str]:
+    """Split text into chunks capped by max_tokens."""
+    normalized = (text or "").strip()
+    if not normalized:
+        return []
+    if max_tokens <= 0:
+        return [normalized]
+
+    tokenizer = _get_tokenizer()
+    if tokenizer:
+        try:
+            tokens = tokenizer.encode(normalized)
+            if len(tokens) <= max_tokens:
+                return [normalized]
+            chunks: list[str] = []
+            for start in range(0, len(tokens), max_tokens):
+                chunk_tokens = tokens[start:start + max_tokens]
+                chunk_text = tokenizer.decode(chunk_tokens).strip()
+                if chunk_text:
+                    chunks.append(chunk_text)
+            if chunks:
+                return chunks
+        except Exception as exc:  # pragma: no cover
+            logger.warning("tiktoken 切分失败，改用字符切分: %s", exc)
+
+    approx_chars = max(max_tokens * 4, 1)
+    fallback_chunks = [
+        normalized[i:i + approx_chars].strip()
+        for i in range(0, len(normalized), approx_chars)
+    ]
+    return [chunk for chunk in fallback_chunks if chunk]
+
+
 def transcribe_audio(file_storage: FileStorage) -> str:
     """Send audio to DashScope ASR and return transcript text."""
     audio_bytes = _validate_audio_file(file_storage)
@@ -187,30 +245,50 @@ def transcribe_audio(file_storage: FileStorage) -> str:
 
 def synthesize_audio(text: str) -> bytes:
     """Convert reply text into speech audio bytes."""
-    if not text.strip():
+    text = (text or "").strip()
+    if not text:
         raise SpeechServiceError("合成内容不能为空")
     if not config.DASHSCOPE_API_KEY:
         raise SpeechServiceError("DASHSCOPE_API_KEY 未配置，无法使用语音合成")
 
-    try:
-        response = SpeechSynthesizer.call(
-            model=config.QWEN_TTS_MODEL,
-            api_key=config.DASHSCOPE_API_KEY,
-            text=text,
-            voice=config.QWEN_SPEECH_VOICE,
-            format=config.QWEN_SPEECH_FORMAT,
-            sample_rate=config.QWEN_SPEECH_SAMPLE_RATE,
-            speed=config.QWEN_SPEECH_SPEED,
-        )
-    except Exception as exc:  # pragma: no cover
-        logger.error("调用 Qwen TTS 失败: %s", exc, exc_info=True)
-        raise SpeechServiceError("语音合成失败，请稍后再试")
+    token_limit = max(getattr(config, "QWEN_TTS_TOKEN_LIMIT", 512), 1)
+    text_chunks = _chunk_text_for_tts(text, token_limit)
+    if not text_chunks:
+        raise SpeechServiceError("无可用文本用于语音合成")
 
-    audio_bytes = _extract_tts_audio_bytes(response)
-    if audio_bytes is None:
-        raise SpeechServiceError("语音合成接口未返回音频数据")
-    return audio_bytes
+    audio_segments: List[bytes] = []
+    for idx, chunk in enumerate(text_chunks, 1):
+        try:
+            response = SpeechSynthesizer.call(
+                model=config.QWEN_TTS_MODEL,
+                api_key=config.DASHSCOPE_API_KEY,
+                text=chunk,
+                voice=config.QWEN_SPEECH_VOICE,
+                format=config.QWEN_SPEECH_FORMAT,
+                sample_rate=config.QWEN_SPEECH_SAMPLE_RATE,
+                speed=config.QWEN_SPEECH_SPEED,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.error("调用 Qwen TTS 失败 (chunk %s/%s): %s", idx, len(text_chunks), exc, exc_info=True)
+            raise SpeechServiceError("语音合成失败，请稍后再试")
 
+        audio_bytes = _extract_tts_audio_bytes(response)
+        if audio_bytes is None:
+            raise SpeechServiceError("语音合成接口未返回音频数据")
+        audio_segments.append(audio_bytes)
+
+    if not audio_segments:
+        raise SpeechServiceError("语音合成失败，未获得任何音频")
+
+    if len(audio_segments) == 1:
+        return audio_segments[0]
+
+    speech_format = (config.QWEN_SPEECH_FORMAT or "").lower()
+    if speech_format != "wav":
+        logger.error("语音分段合成仅支持 WAV 格式，当前格式: %s", speech_format)
+        raise SpeechServiceError("当前语音格式不支持长文本分段合成，请将 QWEN_SPEECH_FORMAT 设置为 wav")
+
+    return _merge_wav_audio_chunks(audio_segments)
 
 def _extract_tts_audio_bytes(response) -> Optional[bytes]:
     """Extract audio bytes from DashScope TTS response, downloading if needed."""
@@ -248,6 +326,48 @@ def _extract_tts_audio_bytes(response) -> Optional[bytes]:
             logger.error("下载 TTS 音频失败: %s", exc, exc_info=True)
             return None
     return None
+
+
+def _merge_wav_audio_chunks(chunks: List[bytes]) -> bytes:
+    """Concatenate WAV chunks produced by segmented TTS."""
+    if not chunks:
+        raise SpeechServiceError("缺少待合并的音频数据")
+
+    params = None
+    frame_buffers: list[bytes] = []
+    for idx, chunk in enumerate(chunks, 1):
+        try:
+            with contextlib.closing(wave.open(io.BytesIO(chunk), "rb")) as wav_reader:
+                chunk_params = wav_reader.getparams()
+                if params is None:
+                    params = chunk_params
+                elif (
+                    chunk_params.nchannels != params.nchannels
+                    or chunk_params.sampwidth != params.sampwidth
+                    or chunk_params.framerate != params.framerate
+                ):
+                    raise SpeechServiceError("语音分段参数不一致，无法合并")
+                frame_buffers.append(wav_reader.readframes(wav_reader.getnframes()))
+        except SpeechServiceError:
+            raise
+        except Exception as exc:
+            logger.error("解析 TTS 第 %s 段音频失败: %s", idx, exc, exc_info=True)
+            raise SpeechServiceError("合并语音时发生错误，请稍后再试")
+
+    if params is None:
+        raise SpeechServiceError("未能读取任何语音数据")
+
+    output = io.BytesIO()
+    try:
+        with contextlib.closing(wave.open(output, "wb")) as wav_writer:
+            wav_writer.setparams(params)
+            for frames in frame_buffers:
+                wav_writer.writeframes(frames)
+    except Exception as exc:
+        logger.error("写入合并后的音频失败: %s", exc, exc_info=True)
+        raise SpeechServiceError("生成合并语音失败")
+
+    return output.getvalue()
 
 
 def _safe_getattr(obj, attr, default=None):

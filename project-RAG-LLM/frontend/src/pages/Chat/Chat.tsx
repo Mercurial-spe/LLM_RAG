@@ -128,13 +128,13 @@ const Chat = () => {
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [supportsRecording, setSupportsRecording] = useState(false);
   const [_pendingTranscript, setPendingTranscript] = useState('');
-  const [_isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
-  const [lastVoiceMessageId, setLastVoiceMessageId] = useState<number | null>(null);
+  const [activeVoiceMessageId, setActiveVoiceMessageId] = useState<number | null>(null);
   const [voiceProcess, setVoiceProcess] = useState<VoiceProcess>('idle');
   const voiceStreamAbortRef = useRef<AbortController | null>(null);
   const [voiceFlowActive, setVoiceFlowActive] = useState(false);
@@ -357,9 +357,6 @@ const Chat = () => {
 
       await loadConversations();
 
-      if (settings.voiceReplyEnabled && assistantReply.trim()) {
-        await playVoiceReply(assistantReply.trim(), assistantId);
-      }
     } catch (error) {
       if ((error as DOMException)?.name === 'AbortError') {
         console.warn('语音流已取消');
@@ -379,7 +376,7 @@ const Chat = () => {
       }
     } finally {
       setIsLoading(false);
-      if (options?.voiceFlow && (!settings.voiceReplyEnabled || !voiceFlowActive)) {
+      if (options?.voiceFlow) {
         setVoiceProcess('idle');
         setVoiceFlowActive(false);
       }
@@ -397,6 +394,7 @@ const Chat = () => {
       audioUrlRef.current = null;
     }
     setIsSpeaking(false);
+    setActiveVoiceMessageId(null);
     if (voiceFlowActive) {
       setVoiceProcess('idle');
       setVoiceFlowActive(false);
@@ -407,25 +405,27 @@ const Chat = () => {
     if (!settings.voiceReplyEnabled || !text.trim()) {
       return;
     }
+    handleStopPlayback();
     setIsGeneratingAudio(true);
     setRecordingError(null);
+    setActiveVoiceMessageId(messageId);
 
     try {
       const audioBlob = await chatAPI.requestVoiceReply(text);
-      handleStopPlayback();
-
       const url = URL.createObjectURL(audioBlob);
       audioUrlRef.current = url;
 
       const audioElement = audioPlayerRef.current;
       if (!audioElement) {
-        console.warn('音频元素尚未就绪，无法播放 TTS');
+        console.warn('?????????????TTS');
+        setActiveVoiceMessageId(null);
         return;
       }
 
       audioElement.src = url;
       audioElement.onended = () => {
         setIsSpeaking(false);
+        setActiveVoiceMessageId(null);
         if (voiceFlowActive) {
           setVoiceProcess('idle');
           setVoiceFlowActive(false);
@@ -434,12 +434,15 @@ const Chat = () => {
       if (voiceFlowActive) {
         setVoiceProcess('speaking');
       }
-      await audioElement.play();
+      const playPromise = audioElement.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
       setIsSpeaking(true);
-      setLastVoiceMessageId(messageId);
     } catch (error) {
-      console.error('语音播报失败:', error);
-      setRecordingError('语音播报失败，请稍后再试');
+      console.error('??????:', error);
+      setRecordingError('????????????');
+      setActiveVoiceMessageId(null);
       if (voiceFlowActive) {
         setVoiceProcess('idle');
         setVoiceFlowActive(false);
@@ -448,6 +451,10 @@ const Chat = () => {
       setIsGeneratingAudio(false);
     }
   };
+
+
+
+
 
   const handleVoiceUpload = async (audioBlob: Blob) => {
     if (!settings.voiceInputEnabled) {
@@ -510,10 +517,8 @@ const Chat = () => {
       setVoiceFlowActive(false);
     } finally {
       voiceStreamAbortRef.current = null;
-      if (!settings.voiceReplyEnabled) {
-        setVoiceProcess('idle');
-        setVoiceFlowActive(false);
-      }
+      setVoiceProcess('idle');
+      setVoiceFlowActive(false);
     }
   };
 
@@ -703,35 +708,66 @@ const Chat = () => {
           ) : (
             currentMessages
               .filter((message) => message.content && message.content.trim().length > 0)  // 过滤空内容消息
-              .map((message) => (
-                <div key={message.id} className={`message ${message.type}`}>
-                  <div className="message-avatar">
-                    <img 
-                      src={message.type === 'user' ? userAvatar : aiAvatar} 
-                      alt={message.type === 'user' ? '用户头像' : 'AI助手头像'}
-                      className="avatar-image"
-                    />
+              .map((message) => {
+                const isAssistant = message.type === 'assistant';
+                const isCurrentVoiceMessage = activeVoiceMessageId === message.id;
+                const isMessagePlaying = isCurrentVoiceMessage && isSpeaking;
+                const isMessageGenerating = isCurrentVoiceMessage && isGeneratingAudio;
+                const disableTtsButton =
+                  !message.content.trim() || (isGeneratingAudio && !isMessagePlaying);
+                const showVoiceButton = isAssistant && settings.voiceReplyEnabled;
+
+                return (
+                  <div key={message.id} className={`message ${message.type}`}>
+                    <div className="message-avatar">
+                      <img 
+                        src={message.type === 'user' ? userAvatar : aiAvatar} 
+                        alt={message.type === 'user' ? '用户头像' : 'AI助手头像'}
+                        className="avatar-image"
+                      />
+                    </div>
+                    <div className="message-content">
+                      {isAssistant ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeHighlight]}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</p>
+                      )}
+                      <div className="message-footer">
+                        <span className="message-time">
+                          {typeof message.timestamp === 'string' 
+                            ? new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                            : message.timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                          }
+                        </span>
+                        {showVoiceButton && (
+                          <button
+                            className={`tts-play-button ${isMessagePlaying ? 'playing' : ''}`}
+                            onClick={() => {
+                              if (isMessagePlaying) {
+                                handleStopPlayback();
+                              } else {
+                                void playVoiceReply(message.content, message.id);
+                              }
+                            }}
+                            disabled={disableTtsButton || isMessageGenerating}
+                          >
+                            {isMessageGenerating
+                              ? '生成中...'
+                              : isMessagePlaying
+                              ? '停止'
+                              : '🔊 播放'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="message-content">
-                    {message.type === 'assistant' ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeHighlight]}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    ) : (
-                      <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</p>
-                    )}
-                    <span className="message-time">
-                      {typeof message.timestamp === 'string' 
-                        ? new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-                        : message.timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-                      }
-                    </span>
-                  </div>
-                </div>
-              ))
+                );
+              })
           )}
           {isLoading && (
             <div className="message assistant">
@@ -783,14 +819,14 @@ const Chat = () => {
             {isLoading ? '发送中...' : '发送'}
           </button>
         </div>
-        {(voiceProcess !== 'idle' || recordingError) && (
+        {(voiceProcess !== 'idle' || recordingError || isSpeaking) && (
           <div className="voice-status-line">
             {voiceProcess !== 'idle' && (
               <span className="voice-status-text">{voiceStatusText[voiceProcess]}</span>
             )}
             {recordingError && <span className="voice-error-inline">{recordingError}</span>}
-            {lastVoiceMessageId && isSpeaking && (
-              <span className="voice-status-text">播报消息 #{lastVoiceMessageId}</span>
+            {isSpeaking && activeVoiceMessageId && (
+              <span className="voice-status-text">播报消息 #{activeVoiceMessageId}</span>
             )}
           </div>
         )}
