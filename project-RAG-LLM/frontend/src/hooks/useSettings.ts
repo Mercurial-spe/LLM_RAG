@@ -14,6 +14,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   voiceInputEnabled: true,
   voiceAutoSend: true,
   voiceReplyEnabled: true,
+  webSearchEnabled: false,
+  llmModel: 'qwen3-max',
 };
 
 const useSettings = () => {
@@ -63,6 +65,9 @@ const useSettings = () => {
       temperature: settings.temperature,
       top_k: settings.topK,
       messages_to_keep: settings.messagesToKeep,
+      max_tokens: settings.maxTokens,
+      web_search_enabled: settings.webSearchEnabled,
+      llm_model: settings.llmModel,
     };
     console.log('🔍 构建的 RAG 配置:', config);
     return config;

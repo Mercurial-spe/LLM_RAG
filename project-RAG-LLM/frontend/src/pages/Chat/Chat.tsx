@@ -6,7 +6,7 @@ import chatAPI from '../../api/chat';
 import useSettings from '../../hooks/useSettings';
 import { useConversationStore } from '../../stores/conversationStore';
 import ConversationSidebar from '../../components/ConversationSidebar/ConversationSidebar';
-import type { Message } from '../../types';
+import type { AppSettings, Message, SearchSource } from '../../types';
 import './Chat.css';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,10 +18,19 @@ import userAvatar from '../../assets/user-avatar.png';
 import aiAvatar from '../../assets/ai-avatar.png';
 import ragFlowImg from '../../assets/RAGFLOW_LangChain.png';
 
+type ChatSettingsProps = {
+  settings: AppSettings;
+  updateSettings: (newSettings: Partial<AppSettings>) => void;
+};
+
 // 快速设置组件
-const ChatSettings = () => {
+const LLM_MODEL_OPTIONS = [
+  { value: 'qwen3-max', label: 'Qwen3 Max' },
+  { value: 'qwen-flash', label: 'Qwen Flash' },
+];
+
+const ChatSettings = ({ settings, updateSettings }: ChatSettingsProps) => {
   const [showSettings, setShowSettings] = useState(false);
-  const { settings, updateSettings } = useSettings();
 
   const handleQuickUpdate = (key: keyof typeof settings, value: any) => {
     console.log(`⚡ 快速设置变更: ${key} = ${value}`);
@@ -76,6 +85,20 @@ const ChatSettings = () => {
             />
           </div>
 
+          <div className="setting-group">
+            <label>LLM 模型</label>
+            <select
+              value={settings.llmModel}
+              onChange={(e) => handleQuickUpdate('llmModel', e.target.value)}
+            >
+              {LLM_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="setting-group checkbox-group">
             <label>
               <input
@@ -116,13 +139,35 @@ const ChatSettings = () => {
 
 type VoiceProcess = 'idle' | 'recording' | 'transcribing' | 'thinking' | 'speaking';
 
+const sanitizeMarkdownForSpeech = (markdown: string): string => {
+  if (!markdown) {
+    return '';
+  }
+  let text = markdown;
+  // 移除代码块与行内代码
+  text = text.replace(/```[\s\S]*?```/g, ' ');
+  text = text.replace(/`([^`]+)`/g, '$1');
+  // 移除图片与链接的多余标记
+  text = text.replace(/!\[[^\]]*]\([^)]+\)/g, '');
+  text = text.replace(/\[([^\]]+)]\([^)]+\)/g, '$1');
+  // 去掉引用、列表等 Markdown 语法符号
+  text = text.replace(/^>\s+/gm, '');
+  text = text.replace(/^[-*+]\s+/gm, '');
+  // 如果包含“参考资料”段落，在语音中跳过
+  const referenceIndex = text.indexOf('参考资料');
+  if (referenceIndex !== -1) {
+    text = text.slice(0, referenceIndex);
+  }
+  return text.replace(/\s+/g, ' ').trim();
+};
+
 const Chat = () => {
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadFileName, setUploadFileName] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const { getRagConfig, isLoaded, settings } = useSettings();
+  const { getRagConfig, isLoaded, settings, updateSettings } = useSettings();
   const [_isRecording, setIsRecording] = useState(false);
   const [_isTranscribing, setIsTranscribing] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -155,6 +200,7 @@ const Chat = () => {
     createNewConversation,
     loadMessages,
     addMessage,
+    updateMessage,
     appendToMessage,
     sessionDocuments,
     loadSessionDocuments,
@@ -341,19 +387,52 @@ const Chat = () => {
       addMessage(assistantMessage);
 
       const ragConfig = getRagConfig();
+      const webSearchEnabledAtSend = settings.webSearchEnabled;
       console.log('📤 发送消息到对话:', targetThreadId);
       console.log('📤 RAG配置:', ragConfig);
 
       let assistantReply = '';
+      let collectedSources: SearchSource[] = [];
+      let backendWebSearchUsed = false;
       for await (const chunk of chatAPI.sendMessageStream(
         textToSend,
         targetThreadId,
         ragConfig,
         options?.signal
       )) {
-        appendToMessage(assistantId, chunk);
-        assistantReply += chunk;
+        if (typeof chunk === 'string') {
+          if (chunk) {
+            appendToMessage(assistantId, chunk);
+            assistantReply += chunk;
+          }
+          continue;
+        }
+        if (!chunk) {
+          continue;
+        }
+        if (chunk.type === 'sources') {
+          collectedSources = chunk.sources || [];
+          backendWebSearchUsed = Boolean(chunk.web_search_used ?? backendWebSearchUsed);
+          continue;
+        }
+        if (chunk.type === 'text') {
+          const textChunk = chunk.content ?? '';
+          if (textChunk) {
+            appendToMessage(assistantId, textChunk);
+            assistantReply += textChunk;
+          }
+        }
       }
+
+      const messageUpdates: Partial<Message> = {
+        content: assistantReply,
+        webSearchRequested: webSearchEnabledAtSend,
+        webSearchUsed: backendWebSearchUsed,
+      };
+      if (webSearchEnabledAtSend || collectedSources.length > 0 || backendWebSearchUsed) {
+        messageUpdates.webSearchSources = collectedSources;
+      }
+      updateMessage(assistantId, messageUpdates);
 
       await loadConversations();
 
@@ -402,7 +481,8 @@ const Chat = () => {
   };
 
   const playVoiceReply = async (text: string, messageId: number) => {
-    if (!settings.voiceReplyEnabled || !text.trim()) {
+    const cleanText = sanitizeMarkdownForSpeech(text) || text;
+    if (!settings.voiceReplyEnabled || !cleanText.trim()) {
       return;
     }
     handleStopPlayback();
@@ -411,7 +491,7 @@ const Chat = () => {
     setActiveVoiceMessageId(messageId);
 
     try {
-      const audioBlob = await chatAPI.requestVoiceReply(text);
+      const audioBlob = await chatAPI.requestVoiceReply(cleanText);
       const url = URL.createObjectURL(audioBlob);
       audioUrlRef.current = url;
 
@@ -649,7 +729,7 @@ const Chat = () => {
               />
               📤 上传文档
             </label>
-            <ChatSettings />
+            <ChatSettings settings={settings} updateSettings={updateSettings} />
           </div>
         </div>
 
@@ -716,6 +796,12 @@ const Chat = () => {
                 const disableTtsButton =
                   !message.content.trim() || (isGeneratingAudio && !isMessagePlaying);
                 const showVoiceButton = isAssistant && settings.voiceReplyEnabled;
+                const sourcesCount = message.webSearchSources?.length ?? 0;
+                const shouldShowSources =
+                  isAssistant &&
+                  ((message.webSearchRequested ?? false) ||
+                    (message.webSearchUsed ?? false) ||
+                    sourcesCount > 0);
 
                 return (
                   <div key={message.id} className={`message ${message.type}`}>
@@ -736,6 +822,42 @@ const Chat = () => {
                         </ReactMarkdown>
                       ) : (
                         <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</p>
+                      )}
+                      {shouldShowSources && (
+                        <details className="web-search-sources">
+                          <summary>
+                            🌐 联网搜索
+                            {sourcesCount
+                              ? `（${sourcesCount} 条）`
+                              : '（未检索到新的公开结果）'}
+                          </summary>
+                          {sourcesCount ? (
+                            <ul>
+                              {message.webSearchSources?.map((source, idx) => {
+                                const title = source.title || source.url || `结果 ${idx + 1}`;
+                                const key = `${source.url ?? title}-${idx}`;
+                                return (
+                                  <li key={key}>
+                                    {source.url ? (
+                                      <a href={source.url} target="_blank" rel="noreferrer">
+                                        {title}
+                                      </a>
+                                    ) : (
+                                      <span>{title}</span>
+                                    )}
+                                    {source.snippet && <p>{source.snippet}</p>}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ) : (
+                            <p className="web-search-empty">
+                              {(message.webSearchUsed ?? false)
+                                ? '已尝试联网搜索，但暂无可靠的公开资料。'
+                                : '联网搜索已开启，必要时会自动补充网络结果。'}
+                            </p>
+                          )}
+                        </details>
                       )}
                       <div className="message-footer">
                         <span className="message-time">
@@ -818,6 +940,32 @@ const Chat = () => {
           <button onClick={() => handleSend()} disabled={!input.trim() || isLoading}>
             {isLoading ? '发送中...' : '发送'}
           </button>
+        </div>
+        <div className="web-search-toggle-bar">
+          <button
+            type="button"
+            className={`web-search-toggle ${settings.webSearchEnabled ? 'active' : ''}`}
+            onClick={() => updateSettings({ webSearchEnabled: !settings.webSearchEnabled })}
+            disabled={isLoading}
+            title="开启后将优先使用知识库，并在需要时补充联网搜索结果"
+          >
+            {settings.webSearchEnabled ? '🌐 已开启联网搜索' : '🌐 点击开启联网搜索'}
+          </button>
+          <div className="inline-llm-selector">
+            <select
+              id="inline-llm-select"
+              aria-label="选择模型"
+              value={settings.llmModel}
+              onChange={(e) => updateSettings({ llmModel: e.target.value })}
+              disabled={isLoading}
+            >
+              {LLM_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {(voiceProcess !== 'idle' || recordingError || isSpeaking) && (
           <div className="voice-status-line">

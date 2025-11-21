@@ -1,4 +1,4 @@
-"""
+﻿"""
 RAG Agent 服务层（重构版）
 ==========================
 职责：
@@ -20,14 +20,17 @@ RAG Agent 服务层（重构版）
 
 import logging
 import os
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain.tools import tool
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents.middleware.model_fallback import ModelFallbackMiddleware
 from .. import config
 from ..services.embedding_service import EmbeddingService
+from ..services.web_search_service import WebSearchService
 from ..services.vector_store_repository import VectorStoreRepository
 from .llm_handler import LLMHandler
 
@@ -138,6 +141,8 @@ def _create_dynamic_agent(
     top_k: int = None,
     messages_to_keep: int = None,
     max_tokens: int = None,
+    use_web_search: bool = False,
+    llm_model: Optional[str] = None,
 ):
     """
     根据传入的动态参数，按需创建一个新的 Agent 实例（不再缓存）。
@@ -170,7 +175,9 @@ def _create_dynamic_agent(
     summarization_threshold = config.MEMORY_MAX_TOKENS_BEFORE_SUMMARY
     
     # --- 2. 获取基础 LLM 并绑定动态参数 ---
-    base_llm = LLMHandler.get_instance().get_model()
+    resolved_llm_model = config.resolve_llm_model(llm_model)
+    llm_handler = LLMHandler.get_instance()
+    base_llm = llm_handler.get_model(model_name=resolved_llm_model)
     
     # 【修正1】收集所有要绑定的 LLM 参数
     llm_params_to_bind = {
@@ -179,6 +186,17 @@ def _create_dynamic_agent(
     }
 
     llm = base_llm.bind(**llm_params_to_bind)
+    # Build fallback model list so LangChain middleware can switch on errors
+    fallback_models = []
+    if len(config.LLM_SUPPORTED_MODELS) > 1:
+        for candidate_model in config.LLM_SUPPORTED_MODELS:
+            if candidate_model == resolved_llm_model:
+                continue
+            try:
+                fallback_base = llm_handler.get_model(model_name=candidate_model)
+                fallback_models.append(fallback_base.bind(**llm_params_to_bind))
+            except Exception as exc:
+                logger.warning("Skip fallback model %s due to init error: %s", candidate_model, exc)
     
     # --- 3. 获取共享的 Checkpointer ---
     checkpointer = _get_checkpointer()
@@ -196,7 +214,8 @@ def _create_dynamic_agent(
         f"temperature={effective_temperature}, top_k={effective_top_k}, "
         f"max_generation_tokens={max_tokens}, "
         f"summary_threshold={summarization_threshold}, "
-        f"messages_to_keep={effective_messages_to_keep}"
+        f"messages_to_keep={effective_messages_to_keep}, "
+        f"llm_model={resolved_llm_model}"
     )
     
     # --- 5. 创建动态 Retriever ---
@@ -204,12 +223,49 @@ def _create_dynamic_agent(
         session_id=session_id,
         top_k=effective_top_k
     )
+    web_search_service = WebSearchService.get_instance()
+    search_state: Dict[str, Any] = {
+        "web_sources": [],
+        "web_search_used": False,
+    }
     
-    # --- 6. 动态创建工具（闭包） ---
+    # --- 6.  ---
     @tool("retrieve_context", response_format="content_and_artifact")
     def retrieve_context_filtered(query: str):
-        """检索与问题相关的上下文内容（限定当前会话范围：系统文档+用户上传文档）。"""
+        """Fetch context for the query from system docs + user uploads (+ optional web search)."""
         docs = retriever.invoke(query)
+
+        if use_web_search:
+            if web_search_service.is_available():
+                logger.info("web_search: trigger query=%r", query)
+                search_state["web_search_used"] = True
+                web_results = web_search_service.search(
+                    query,
+                    max_results=config.WEB_SEARCH_RESULT_LIMIT,
+                )
+                if web_results:
+                    logger.info("web_search: got %s results", len(web_results))
+                    search_state["web_sources"] = web_results
+                    for item in web_results:
+                        snippet = item.get("snippet") or ""
+                        if not snippet:
+                            continue
+                        docs.append(
+                            Document(
+                                page_content=snippet,
+                                metadata={
+                                    "source": item.get("url") or item.get("source") or "web",
+                                    "session_id": "external",
+                                    "title": item.get("title") or item.get("url") or "Web Result",
+                                    "source_type": "web",
+                                },
+                            )
+                        )
+                else:
+                    logger.info("web_search: no results")
+            else:
+                logger.debug("web_search: requested but Tavily API Key not available")
+
         serialized = "\n\n".join(
             (
                 f"Source: {doc.metadata.get('source', '<unknown>')}\n"
@@ -219,62 +275,46 @@ def _create_dynamic_agent(
             )
         )
         return serialized, docs
-    
+
     # --- 7. System Prompt ---
     system_prompt = (
-        "你是华南理工大学计算机网络课程的学习助手，同时扮演助教角色。\n"
-        "你的任务是根据你所拥有的知识，以及在必要时来自工具 `retrieve_context` 的知识库内容，\n"
-        "为学生提供准确、清晰、易懂的解答。\n"
-        "你可以自行判断是否需要调用知识库来回答问题，而不是每次都强制调用。\n"
-        "作为助教，你需要适时询问学生是否理解，例如：\n"
-        "‘是否需要我举例说明？’、‘是否需要结合真实网络场景解释？’、‘是否有不懂的地方需要我进一步展开？’。\n"
+        "你通过扮演一门计算机网络课程的助教以及一个‘检索优先’的智能体。\n"
+        "工具：`retrieve_context`（返回内部知识库 KB + 网络搜索结果）。当 `use_web_search=True` 时，必须在每一轮回答**之前**先调用一次 `retrieve_context`。\n"
+        "如果用户的查询中包含 web/online/最新/实时/当前/最近/年份 等关键词，必须调用 `retrieve_context` 并引用公开来源。\n"
+        "如果内部知识库 (KB) 与网络搜索结果存在冲突，请明确指出差异（如时间、版本不同），并同时展示这两个视角的观点。\n"
         "\n"
-        "==============================\n"
-        "【核心规则】\n"
-        "==============================\n"
-        "1. 当你使用外部资料时，必须基于工具 `retrieve_context` 返回的 Content。\n"
-        "2. 严禁使用内部知识或主观推测来编造资料中没有的内容。\n"
-        "3. 如果资料不足以回答问题，可以直接说明：\n"
-        "   ‘根据我所掌握的资料，无法提供完整答案，但我可以用已有知识给出解释。’\n"
+        "回答规则：\n"
+        "1) 务必先调用 `retrieve_context`，然后基于检索到的内容进行回答。\n"
+        "2) 如果使用了外部来源，请在回答末尾添加引用模块，格式为——来源：[链接或出处]；内容：[约50字的摘要]。\n"
+        "3) 使用 Markdown 格式（标题、列表）组织内容。如果信息不足，请直接说明，并建议用户进行更多搜索或上传资料。\n"
+        "4) 关于冲突处理：明确标记“内部资料 vs 网络信息”的差异，然后给出一个平衡的观点。\n"
         "\n"
-        "==============================\n"
-        "【引用与格式要求】\n"
-        "==============================\n"
-        "1. 若引用了外部资料，回答必须在结尾另起一段，以 ‘参考资料’ 为标题，按以下格式列出：\n"
-        "   ```\n"
-        "   Source: [工具返回的 Source]\n"
-        "   Content: [引用的 Content 摘要（约 50 字）]\n"
-        "   ```\n"
-        "2. 必须使用规范 Markdown 格式。\n"
+        "语气与教学风格：\n"
+        "-以此深入浅出的方式开场，避免一开始就堆砌生涩的术语。\n"
+        "- 针对关键主题（如链路层、路由协议、TCP 拥塞控制、DNS、ARP 等），适时提供额外的具体示例或实验场景。\n"
+        "- 如果学生看起来不确定或有困惑，主动提供辅助选项（如：、更简化的场景类比、或考试风格的练习题）。\n"
+        "- 保持鼓励、支持和乐于助人的态度。\n"
         "\n"
-        "==============================\n"
-        "【助教身份要求】\n"
-        "==============================\n"
-        "作为计算机网络课程的助教，你需要做到：\n"
-        "- 讲解深入浅出，不堆砌术语，让学生听得懂；\n"
-        "- 在关键知识点（如链路层、路由、TCP 拥塞控制、DNS、ARP 等）后，主动询问学生是否需要更详细的例子或实际网络场景对照；\n"
-        "- 在发现学生疑惑时及时提出可选方向，例如：\n"
-        "  ‘是否需要我给你画出流程图？’、\n"
-        "  ‘要不要我用更简单的场景再解释一次？’、\n"
-        "  ‘需要我讲讲考试中对应的常见题型吗？’；\n"
-        "- 帮助学生真正理解，而不仅是死记硬背。\n"
-        "\n"
-        "你的最终目标是帮助学生掌握计算机网络知识，并顺利通过考试。"
-
+        "目标：帮助学生真正理解知识点，并顺利通过课程考试。"
     )
-    
+
     # --- 8. 创建 Agent ---
+    middleware_stack = [summarization_middleware]
+    if fallback_models:
+        middleware_stack.append(ModelFallbackMiddleware(*fallback_models))
+
     agent = create_agent(
         llm,
         tools=[retrieve_context_filtered],
         system_prompt=system_prompt,
         checkpointer=checkpointer,
-        middleware=[summarization_middleware],
+        middleware=middleware_stack,
     )
+
+    logger.info('agent created: session_id=%s use_web_search=%s', session_id, use_web_search)
     
-    logger.info(f"✅ 动态 Agent 已创建（session_id={session_id})")
     
-    return agent
+    return agent, search_state
 
 
 
@@ -286,7 +326,9 @@ def invoke(
     temperature: float = None,
     top_k: int = None,
     messages_to_keep: int = None,
-    max_tokens: int = None
+    max_tokens: int = None,
+    use_web_search: bool = False,
+    llm_model: Optional[str] = None,
 ) -> str:
     """
     一次性调用，返回完整回答文本。
@@ -299,16 +341,19 @@ def invoke(
         top_k: RAG 检索的 K 值
         messages_to_keep: 记忆压缩后保留的消息数
         max_tokens: 最大生成token数
+        llm_model: 指定使用的 LLM 模型名称
     
     Returns:
         完整回答文本
     """
-    agent = _create_dynamic_agent(
+    agent, _ = _create_dynamic_agent(
         session_id=thread_id,
         temperature=temperature,
         top_k=top_k,
         messages_to_keep=messages_to_keep,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        use_web_search=use_web_search,
+        llm_model=llm_model,
     )
     config_dict = {"configurable": {"thread_id": thread_id}}
     
@@ -334,7 +379,8 @@ def stream_updates(
     thread_id: str = "1",
     temperature: float = None,
     top_k: int = None,
-    messages_to_keep: int = None
+    messages_to_keep: int = None,
+    llm_model: Optional[str] = None,
 ):
     """
     步骤级流（model → tools → model）。产出 dict，便于调试与观测。
@@ -345,15 +391,17 @@ def stream_updates(
         temperature: LLM 温度参数
         top_k: RAG 检索的 K 值
         messages_to_keep: 记忆压缩后保留的消息数
+        llm_model: 指定使用的 LLM 模型
     
     Yields:
         步骤更新字典
     """
-    agent = _create_dynamic_agent(
+    agent, _ = _create_dynamic_agent(
         session_id=thread_id,
         temperature=temperature,
         top_k=top_k,
-        messages_to_keep=messages_to_keep
+        messages_to_keep=messages_to_keep,
+        llm_model=llm_model,
     )
     config_dict = {"configurable": {"thread_id": thread_id}}
     for chunk in agent.stream(
@@ -371,6 +419,8 @@ def stream_messages(
     top_k: int = None,
     messages_to_keep: int = None,
     max_tokens: int = None,
+    use_web_search: bool = False,
+    llm_model: Optional[str] = None,
 ):
     """
     仅流式输出模型文本块（逐段）。产出 str。
@@ -382,16 +432,19 @@ def stream_messages(
         top_k: RAG 检索的 K 值
         messages_to_keep: 记忆压缩后保留的消息数
         max_tokens: 最大生成token数
+        llm_model: 指定使用的 LLM 模型
     
     Yields:
         文本块字符串
     """
-    agent = _create_dynamic_agent(
+    agent, search_state = _create_dynamic_agent(
         session_id=thread_id,
         temperature=temperature,
         top_k=top_k,
         messages_to_keep=messages_to_keep,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        use_web_search=use_web_search,
+        llm_model=llm_model,
     )
     config_dict = {"configurable": {"thread_id": thread_id}}
     for token, meta in agent.stream(
@@ -408,4 +461,10 @@ def stream_messages(
             if isinstance(block, dict) and block.get("type") == "text":
                 text = block.get("text", "")
                 if text:
-                    yield text
+                    yield {"type": "text", "content": text}
+    if use_web_search:
+        yield {
+            "type": "sources",
+            "sources": search_state.get("web_sources", []),
+            "web_search_used": bool(search_state.get("web_search_used")),
+        }

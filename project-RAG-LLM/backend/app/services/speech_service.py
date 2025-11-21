@@ -10,6 +10,7 @@ from typing import Optional, Any, List
 import httpx
 from dashscope.audio.qwen_tts import SpeechSynthesizer
 from werkzeug.datastructures import FileStorage
+from ..core.llm_handler import LLMHandler
 
 try:
     import tiktoken  # type: ignore
@@ -180,6 +181,56 @@ def _chunk_text_for_tts(text: str, max_tokens: int) -> list[str]:
     return [chunk for chunk in fallback_chunks if chunk]
 
 
+def _clean_text_for_tts(raw: str) -> str:
+    """Lightweight cleanup to make TTS输出更自然：去掉Markdown/引用/代码/链接，并做简单重写。"""
+    if not raw:
+        return ""
+    text = raw
+    # 去掉代码块与行内代码
+    import re
+
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # 去掉 Markdown 链接/图片标记
+    text = re.sub(r"!\[[^\]]*]\([^)]+\)", "", text)
+    text = re.sub(r"\[([^\]]+)]\([^)]+\)", r"\1", text)
+    # 将裸露 URL/邮箱替换为可读提示
+    text = re.sub(r"https?://\S+", "（链接省略）", text)
+    text = re.sub(r"\S+@\S+\.\S+", "（邮箱省略）", text)
+    # 去掉引用/列表符号
+    text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^[-*+]\s+", "", text, flags=re.MULTILINE)
+    # 合并多余空白
+    text = re.sub(r"\s+", " ", text)
+    cleaned = text.strip()
+    if not cleaned:
+        return "内容包含大量代码或链接，已省略不适合朗读的部分。"
+    return cleaned
+
+
+def _rewrite_with_llm_for_tts(text: str) -> str:
+    """Optionally ask the LLM to rewrite text into TTS-friendly plain language."""
+    if not getattr(config, "TTS_REWRITE_WITH_LLM", False):
+        return text
+    # 简单检测：若包含表格/大量符号则尝试重写
+    needs_rewrite = any(sym in text for sym in ["|", "```", "<table", "</", "[", "]"])
+    if not needs_rewrite:
+        return text
+    prompt = (
+        "将下面内容改写为适合语音朗读的纯文本，去掉表格/链接/Markdown/代码，只保留含义，保持简洁：\n"
+        f"{text}"
+    )
+    try:
+        llm = LLMHandler.get_instance().get_model()
+        resp = llm.invoke(prompt)
+        content = getattr(resp, "content", None)
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("TTS 重写失败，使用原清理文本: %s", exc)
+    return text
+
+
 def transcribe_audio(file_storage: FileStorage) -> str:
     """Send audio to DashScope ASR and return transcript text."""
     audio_bytes = _validate_audio_file(file_storage)
@@ -245,7 +296,8 @@ def transcribe_audio(file_storage: FileStorage) -> str:
 
 def synthesize_audio(text: str) -> bytes:
     """Convert reply text into speech audio bytes."""
-    text = (text or "").strip()
+    text = _clean_text_for_tts(text or "")
+    text = _rewrite_with_llm_for_tts(text)
     if not text:
         raise SpeechServiceError("合成内容不能为空")
     if not config.DASHSCOPE_API_KEY:

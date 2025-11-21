@@ -27,7 +27,7 @@ interface ConversationStore {
   createNewConversation: (title?: string) => Promise<string | null>;
   loadMessages: (threadId: string) => Promise<void>;
   addMessage: (message: Message) => void;
-  updateMessage: (messageId: number, content: string) => void;
+  updateMessage: (messageId: number, updates: Partial<Message>) => void;
   appendToMessage: (messageId: number, chunk: string) => void;
   deleteConversation: (threadId: string) => Promise<boolean>;
   updateConversationTitle: (threadId: string, title: string) => Promise<boolean>;
@@ -130,10 +130,10 @@ export const useConversationStore = create<ConversationStore>()(
         }));
       },
       
-      updateMessage: (messageId, content) => {
+      updateMessage: (messageId, updates) => {
         set((state) => ({
           currentMessages: state.currentMessages.map(msg =>
-            msg.id === messageId ? { ...msg, content } : msg
+            msg.id === messageId ? { ...msg, ...updates } : msg
           )
         }));
       },
@@ -244,4 +244,3 @@ export const useConversationStore = create<ConversationStore>()(
     }
   )
 );
-

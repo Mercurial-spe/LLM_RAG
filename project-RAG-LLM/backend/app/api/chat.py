@@ -15,6 +15,7 @@ from ..services.speech_service import (
     synthesize_audio,
     SpeechServiceError,
 )
+from ..services.web_search_service import WebSearchService
 import logging
 import uuid
 import json
@@ -79,11 +80,22 @@ def chat_message_stream():
     # 从 config.py 导入默认值作为 fallback
     from .. import config as app_config
     
+    requested_llm_model = config_data.get("llm_model")
+    resolved_llm_model = app_config.resolve_llm_model(requested_llm_model)
+    if requested_llm_model and resolved_llm_model != requested_llm_model:
+        logger.warning("前端请求的 llm_model=%s 未受支持，已回退至 %s", requested_llm_model, resolved_llm_model)
+
     dynamic_params = {
         "temperature": config_data.get("temperature", getattr(app_config, 'RAG_TEMPERATURE', 0.2)),
         "top_k": config_data.get("top_k", app_config.RAG_TOP_K),
-        "messages_to_keep": config_data.get("messages_to_keep", app_config.MEMORY_MESSAGES_TO_KEEP)
+        "messages_to_keep": config_data.get("messages_to_keep", app_config.MEMORY_MESSAGES_TO_KEEP),
+        "max_tokens": config_data.get("max_tokens", app_config.LLM_MAX_TOKENS),
+        "llm_model": resolved_llm_model,
     }
+    use_web_search = bool(config_data.get("web_search_enabled"))
+    web_search_service = WebSearchService.get_instance()
+    if use_web_search and not web_search_service.is_available():
+        logger.warning("前端请求启用联网搜索，但后端未启用该功能或缺少 Tavily API Key")
     
     # 【调试日志】记录接收到的前端配置
     logger.info(f"📥 /chat/stream 接收到前端数据:")
@@ -107,13 +119,14 @@ def chat_message_stream():
         try:
             # 使用基于 LangChain Agent 的 RAG 流，只推送"模型文本"
             # 传递 thread_id 以支持短期记忆，传递动态参数
-            for text in stream_messages(
+            for chunk in stream_messages(
                 user_message,
                 thread_id=thread_id,
+                use_web_search=use_web_search,
                 **dynamic_params  # 将所有动态参数解包传入
             ):
                 # 使用 JSON 编码保留换行符，避免与 SSE 的 \n\n 冲突
-                yield f"data: {json.dumps(text, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             yield "event: done\n"
         except Exception as e:
             yield "event: error\n"
@@ -163,11 +176,21 @@ def chat_voice():
             logger.warning("语音接口 config 字段解析失败，原始值: %s", config_raw)
 
     from .. import config as app_config
+    requested_llm_model = config_data.get("llm_model")
+    resolved_llm_model = app_config.resolve_llm_model(requested_llm_model)
+    if requested_llm_model and resolved_llm_model != requested_llm_model:
+        logger.warning("语音接口请求的 llm_model=%s 未受支持，已回退至 %s", requested_llm_model, resolved_llm_model)
+
     dynamic_params = {
         "temperature": config_data.get("temperature", getattr(app_config, 'RAG_TEMPERATURE', 0.2)),
         "top_k": config_data.get("top_k", app_config.RAG_TOP_K),
-        "messages_to_keep": config_data.get("messages_to_keep", app_config.MEMORY_MESSAGES_TO_KEEP)
+        "messages_to_keep": config_data.get("messages_to_keep", app_config.MEMORY_MESSAGES_TO_KEEP),
+        "max_tokens": config_data.get("max_tokens", app_config.LLM_MAX_TOKENS),
+        "llm_model": resolved_llm_model,
     }
+    voice_web_search = bool(config_data.get("web_search_enabled"))
+    if voice_web_search and not WebSearchService.get_instance().is_available():
+        logger.warning("语音接口请求启用联网搜索，但后端未启用该功能或缺少 Tavily API Key")
 
     try:
         transcript = transcribe_audio(audio_file)
@@ -187,6 +210,9 @@ def chat_voice():
                 temperature=dynamic_params["temperature"],
                 top_k=dynamic_params["top_k"],
                 messages_to_keep=dynamic_params["messages_to_keep"],
+                max_tokens=dynamic_params["max_tokens"],
+                use_web_search=voice_web_search,
+                llm_model=dynamic_params["llm_model"],
             )
         except Exception as exc:  # pragma: no cover
             logger.error("语音问答失败: %s", exc, exc_info=True)

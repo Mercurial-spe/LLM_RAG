@@ -3,7 +3,7 @@
  */
 import axios from 'axios';
 import { API_BASE_URL } from '../constants/config';
-import type { ChatResponse, VoiceChatResponse } from '../types';
+import type { ChatResponse, VoiceChatResponse, ChatStreamChunk, SearchSource } from '../types';
 
 const chatAPI = {
   /**
@@ -53,7 +53,7 @@ const chatAPI = {
     sessionId: string | null = null,
     config: Record<string, any> | null = null,
     signal?: AbortSignal
-  ): AsyncIterable<string> => {
+  ): AsyncIterable<ChatStreamChunk> => {
     async function* iterator() {
       const requestBody = {
         message,
@@ -103,12 +103,30 @@ const chatAPI = {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
                 if (data) {
-                  // 后端使用 JSON 编码传输，需要解码以还原换行符
+                  let parsed: unknown = data;
                   try {
-                    yield JSON.parse(data);
+                    parsed = JSON.parse(data);
                   } catch {
-                    // 降级：如果解析失败，直接返回原始字符串
-                    yield data;
+                    parsed = data;
+                  }
+                  if (typeof parsed === 'string') {
+                    yield { type: 'text', content: parsed };
+                  } else if (parsed && typeof parsed === 'object') {
+                    const chunk = parsed as Record<string, unknown>;
+                    if (chunk.type === 'sources') {
+                      const sources = Array.isArray(chunk.sources) ? (chunk.sources as SearchSource[]) : [];
+                      yield {
+                        type: 'sources',
+                        sources,
+                        web_search_used: Boolean(chunk.web_search_used),
+                      };
+                    } else {
+                      const rawContent = (chunk as Record<string, unknown>).content;
+                      const content = typeof rawContent === 'string'
+                        ? rawContent
+                        : String(rawContent ?? '');
+                      yield { type: 'text', content };
+                    }
                   }
                 }
               }
@@ -123,12 +141,30 @@ const chatAPI = {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data) {
-                // 后端使用 JSON 编码传输，需要解码以还原换行符
+                let parsed: unknown = data;
                 try {
-                  yield JSON.parse(data);
+                  parsed = JSON.parse(data);
                 } catch {
-                  // 降级：如果解析失败，直接返回原始字符串
-                  yield data;
+                  parsed = data;
+                }
+                if (typeof parsed === 'string') {
+                  yield { type: 'text', content: parsed };
+                } else if (parsed && typeof parsed === 'object') {
+                  const chunk = parsed as Record<string, unknown>;
+                  if (chunk.type === 'sources') {
+                    const sources = Array.isArray(chunk.sources) ? (chunk.sources as SearchSource[]) : [];
+                    yield {
+                      type: 'sources',
+                      sources,
+                      web_search_used: Boolean(chunk.web_search_used),
+                    };
+                  } else {
+                    const rawContent = (chunk as Record<string, unknown>).content;
+                    const content = typeof rawContent === 'string'
+                      ? rawContent
+                      : String(rawContent ?? '');
+                    yield { type: 'text', content };
+                  }
                 }
               }
             }
