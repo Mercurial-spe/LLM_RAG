@@ -20,27 +20,6 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
-from openai import OpenAI
-from .. import config  # <-- 保留相对导入，完全没问题！
-
-def call_model_stream(user_prompt: str):
-    """封装了调用LLM并流式返回的核心功能"""
-    client = OpenAI(
-        base_url='https://api-inference.modelscope.cn/v1',
-        # 使用最简洁的方式直接赋值
-        api_key=config.MODELSCOPE_API_KEY, 
-    )
-
-    response = client.chat.completions.create(
-        model='Qwen/Qwen3-8B',
-        messages=[
-            {'role': 'system', 'content': 'You are a helpful assistant.'},
-            {'role': 'user', 'content': user_prompt}
-        ],
-        stream=True
-    )
-    yield from response
-    
 class LLMHandler:
     """
     LLM 调用服务 (单例模式)
