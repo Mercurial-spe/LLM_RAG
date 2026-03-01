@@ -1,14 +1,24 @@
 from flask import Flask
 from flask_cors import CORS
 import logging
+import os
 
-from .config import DEBUG, ENABLE_CORS, CORS_ORIGINS
+from .config import DEBUG, ENABLE_CORS, CORS_ORIGINS, LANGSMITH_API_KEY, LANGSMITH_PROJECT
 from .utils.logger import setup_logging
 
 # 【关键】在创建 Flask app 之前配置日志
 setup_logging()
 
 logger = logging.getLogger(__name__)
+
+# 配置 LangSmith (可观测性)
+if LANGSMITH_API_KEY:
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = LANGSMITH_API_KEY
+    os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
+    logger.info(f"🔍 LangSmith 追踪已启用 - 项目: {LANGSMITH_PROJECT}")
+else:
+    logger.info("ℹ️ LangSmith 未配置 (需要 LANGSMITH_API_KEY 环境变量)")
 
 
 def create_app() -> Flask:

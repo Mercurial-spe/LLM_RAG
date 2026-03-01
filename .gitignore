@@ -294,5 +294,5 @@ local_settings.py
 .personal/
 notes.md
 my_notes.txt
-
 CLAUDE.md
+.claude/

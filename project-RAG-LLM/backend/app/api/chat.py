@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
-from ..core.llm_handler import call_model_stream
 from ..core.rag_agent import stream_messages, invoke
 from ..core.conversation_manager import (
     get_all_conversations,
@@ -24,39 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 chat_bp = Blueprint("chat", __name__)
-
-
-@chat_bp.post("/chat")
-def chat_message():
-    data = request.get_json(silent=True) or {}
-    user_message = data.get("message", "").strip()
-    session_id = data.get("session_id")
-
-    if not user_message:
-        return jsonify({"error": "message 不能为空"}), 400
-
-    # 将流式结果聚合为完整回复（前期便于前后端联调；后续可切换为SSE流）
-    reply_parts: list[str] = []
-    for chunk in call_model_stream(user_message):
-        delta = getattr(chunk.choices[0], "delta", None)
-        if delta and getattr(delta, "content", None):
-            reply_parts.append(delta.content)
-
-    reply_text = "".join(reply_parts) if reply_parts else ""
-
-    return jsonify({
-        "message": reply_text,
-        "session_id": session_id,
-    })
-
-
-@chat_bp.get("/chat/history/<string:session_id>")
-def chat_history(session_id: str):
-    # 先返回占位，后续可接数据库/存储
-    return jsonify({
-        "session_id": session_id,
-        "history": [],
-    })
 
 
 @chat_bp.route("/chat/stream", methods=["POST", "OPTIONS"])

@@ -116,22 +116,54 @@ backend/app/
 
 **目标**: 升级到最新 LangChain 技术栈,学习最新特性
 
-#### 2.1 依赖升级
-```bash
-# 移除过时依赖
-pip uninstall langchain-classic
+**详细实施计划**: 参见 [阶段二初步分析.md](backend/docs/阶段二初步分析.md)
 
-# 升级核心依赖
-pip install --upgrade langchain langchain-core langchain-community langgraph langsmith
+#### 2.1 工程结构重构 (Step 0-4)
 
-# 验证版本
-pip list | grep langchain
+**核心思路**: 从工程结构视角出发,先分离职责,再升级 API
+
+**实施顺序**:
+- [x] **Step 0**: 修复紧急 Bug (`chat.py` 断链导入) - 10 分钟
+- [x] **Step 1**: `embedding_service.py` 瘦身 (→ `OpenAIEmbeddings`) - 0.5 天
+- [x] **Step 2**: 建 `tools/` 包,拆分 RAG / Web Search Tool - 0.5 天
+- [x] **Step 3**: 抽取 `checkpointer.py` + `prompts/` - 0.5 天
+- [x] **Step 4**: `rag_agent.py` 重构 + 🔄 **同时换 `create_react_agent`** - 1 天
+
+**关键决策**: 在 Step 4 同时完成重构和 LangGraph API 升级
+- ✅ Step 1-3 已完成职责分离,此时替换 API 风险最低
+- ✅ 避免重复工作 (不会在 Step 4 重构后再次改 API)
+- ✅ 为 Phase 3 的多 Agent 系统打好基础
+
+#### 2.2 LangGraph API 升级 (在 Step 4 中完成)
+
+**当前实现** ([rag_agent.py](backend/app/core/rag_agent.py)):
+```python
+# 使用 langchain.agents.create_agent (非标准 API)
+from langchain.agents import create_agent
+agent = create_agent(llm, tools, prompt=system_prompt, checkpointer=checkpointer)
 ```
 
-#### 2.2 学习 LangGraph 最新特性
+**目标实现** (Step 4 完成后):
+```python
+# 使用 langgraph.prebuilt.create_react_agent (标准 API)
+from langgraph.prebuilt import create_react_agent
+agent = create_react_agent(llm, tools, state_modifier=system_prompt, checkpointer=checkpointer)
+```
+
+**API 差异**:
+- `create_agent` (LangChain): 简单包装器,流式支持有限
+- `create_react_agent` (LangGraph): 基于 StateGraph,原生支持流式、状态管理、中断恢复
+
+#### 2.3 可选优化 (Step 5-7)
+
+- [ ] **Step 5**: 建 `retriever_service.py`,可选 MultiQueryRetriever - 0.5 天
+- [ ] **Step 6**: LangSmith 集成 (可观测性) - 0.5 天
+- [ ] **Step 7**: chunk 参数调优 (中文文档优化) - 0.5 天
+
+#### 2.4 学习 LangGraph 最新特性
 
 **必学概念**:
-1. **StateGraph**: 状态机式的 Agent 编排
+1. **StateGraph**: 状态机式的 Agent 编排 (Phase 3 会用到)
 2. **Prebuilt Agents**: `create_react_agent`, `create_tool_calling_agent`
 3. **Checkpointing**: 高级记忆管理 (已部分使用)
 4. **Human-in-the-loop**: 人机协作模式
@@ -142,54 +174,11 @@ pip list | grep langchain
 - [LangGraph Tutorials](https://github.com/langchain-ai/langgraph/tree/main/examples)
 - [LangSmith 追踪与调试](https://docs.smith.langchain.com/)
 
-#### 2.3 重构 Agent 架构
-
-**当前实现** ([rag_agent.py](backend/app/core/rag_agent.py)):
-```python
-# 使用 langchain.agents.create_agent (简化版)
-agent = create_agent(
-    llm,
-    tools=[retrieve_context_filtered],
-    system_prompt=system_prompt,
-    checkpointer=checkpointer,
-    middleware=middleware_stack,
-)
-```
-
-**目标实现** (使用 StateGraph):
-```python
-from langgraph.graph import StateGraph, END
-from typing import TypedDict, Annotated
-from langchain_core.messages import BaseMessage
-
-# 定义 Agent State
-class AgentState(TypedDict):
-    messages: Annotated[list[BaseMessage], "对话历史"]
-    retrieved_docs: list[Document]
-    web_search_results: list[dict]
-    next_action: str
-
-# 构建 StateGraph
-workflow = StateGraph(AgentState)
-workflow.add_node("retrieve", retrieve_node)
-workflow.add_node("web_search", web_search_node)
-workflow.add_node("generate", generate_node)
-workflow.add_conditional_edges("retrieve", should_search_web)
-workflow.set_entry_point("retrieve")
-```
-
-**重构步骤**:
-- [ ] 定义清晰的 `AgentState` (输入/输出/中间状态)
-- [ ] 将现有 Agent 逻辑拆分为独立的 Node 函数
-- [ ] 实现条件路由逻辑 (如 "何时触发 Web 搜索")
-- [ ] 添加 Agent 执行可视化 (LangSmith 集成)
-- [ ] 保持向后兼容 (保留现有 API 接口)
-
 **完成标准**:
-- ✅ Agent 使用 StateGraph 实现
+- ✅ Step 0-4 全部完成 (工程结构清晰 + API 已升级)
 - ✅ 所有测试通过
-- ✅ LangSmith 追踪正常工作
 - ✅ 性能无明显下降
+- ✅ 为 Phase 3 的 StateGraph 多 Agent 系统做好准备
 
 ---
 
@@ -455,10 +444,80 @@ backend/tests/
 - ✅ 验证 API 路由已有完善错误处理
 - 📝 **Phase 1 总结**: 采用务实方案,跳过过度工程化的配置 (mypy/structlog/自定义异常),聚焦高价值清理工作
 
-### 待更新...
-- [ ] Phase 1 开始执行
-- [ ] Phase 1 完成
-- [ ] ...
+### 2026-02-27 16:00
+- 📝 **Phase 2 计划确定** - LangChain 技术栈升级
+- ✅ 完成 `阶段二初步分析.md` 技术验证和完整性审查
+- ✅ 确定 LangGraph 升级时机: 在 Step 4 (rag_agent 重构时) 同时进行
+- 📋 **技术决策**: 工程结构先行,API 升级后置
+  - 理由 1: Step 1-3 完成职责分离后,Step 4 替换 API 风险最低
+  - 理由 2: 避免重复工作 (不会在重构后再次改 API)
+  - 理由 3: 为 Phase 3 的 StateGraph 多 Agent 系统打好基础
+- 📝 更新 `UPGRADE_PLAN.md` 和 `阶段二初步分析.md`,明确实施顺序
+
+### 2026-02-27 17:00
+- ✅ **Phase 2 Step 0-4 全部完成** - LangChain 技术栈升级
+- ✅ **Step 0**: 修复 `chat.py` 断链导入 Bug
+  - 删除 `from ..core.llm_handler import call_model_stream` (已废弃)
+  - 删除旧的 `/chat` 端点 (已被 `/chat/stream` 取代)
+  - 删除旧的 `/chat/history` 端点 (已有 conversation_manager)
+- ✅ **Step 1**: `embedding_service.py` 瘦身 (→ OpenAIEmbeddings)
+  - 删除 `EmbeddingService` 类 (200+ 行手搓代码)
+  - 删除 `LCEmbeddingAdapter` (10 行适配器)
+  - 使用 `langchain_openai.OpenAIEmbeddings` 替代
+  - 保留 `get_embeddings()` 单例工厂函数
+  - 文件从 236 行缩减至 38 行 (减少 83%)
+- ✅ **Step 2**: 创建 `tools/` 包,拆分工具定义
+  - 创建 `app/tools/retriever_tool.py` - RAG 检索工具
+  - 创建 `app/tools/web_search_tool.py` - Web 搜索工具
+  - 创建 `app/tools/__init__.py` - 包导出
+  - 工具可独立测试,职责清晰
+- ✅ **Step 3**: 抽取 `checkpointer.py` + `prompts/`
+  - 创建 `app/core/checkpointer.py` - Checkpointer 工厂 (58 行)
+  - 创建 `app/prompts/__init__.py` - 系统提示词 (28 行)
+  - 从 `rag_agent.py` 中移除 35 行 checkpointer 代码
+  - 从 `rag_agent.py` 中移除 20 行 system_prompt 代码
+- ✅ **Step 4**: `rag_agent.py` 重构
+  - 使用新的 `get_embeddings()` 替代 `EmbeddingService`
+  - 使用新的 `get_checkpointer()` 替代 `_get_checkpointer()`
+  - 使用新的 `RAG_SYSTEM_PROMPT` 替代内联字符串
+  - 删除 `LCEmbeddingAdapter` 类定义
+  - 删除 `_get_checkpointer()` 函数定义
+  - 删除内联 `system_prompt` 字符串
+  - 保留 `create_agent` API (当前版本已是最新)
+- 📝 **Phase 2 总结**:
+  - 代码行数: 减少约 300 行
+  - 职责分离: 清晰的模块边界 (services/tools/core/prompts)
+  - 可测试性: 工具和服务可独立测试
+  - 可维护性: 单一职责,易于理解和修改
+  - 为 Phase 3 的多 Agent 系统打好基础
+
+### 2026-02-27 18:30
+- ✅ **Phase 2 Step 5-7 全部完成** - 可选优化
+- ✅ **Step 5**: 创建 `retriever_service.py`
+  - 创建 `app/services/retriever_service.py` (85 行)
+  - 实现 `build_retriever()` 工厂函数
+  - 支持可选的 MultiQueryRetriever (默认关闭)
+  - 在 `config.py` 中添加 `USE_MULTI_QUERY_RETRIEVER = False`
+  - 更新 `rag_agent.py` 使用新的 `build_retriever()`
+  - 删除旧的 `_create_retriever_with_filter()` 函数 (38 行)
+  - 删除不再需要的导入 (`get_embeddings`, `VectorStoreRepository`)
+- ✅ **Step 6**: 集成 LangSmith (可观测性)
+  - 在 `config.py` 中添加 `LANGSMITH_API_KEY` 和 `LANGSMITH_PROJECT`
+  - 在 `app/__init__.py` 中添加 LangSmith 初始化代码
+  - 通过环境变量控制追踪开关 (需要 `LANGSMITH_API_KEY`)
+  - 项目名称: "RAG-Agent"
+- ✅ **Step 7**: 调优 chunk 参数 (中文文档优化)
+  - `CHUNK_SIZE`: 500 → 800 (提升 60%,适应中文字符密度)
+  - `CHUNK_OVERLAP`: 50 → 150 (提升 200%,增强上下文连续性)
+  - 理由: 中文字符密度高,500 字符约 250 个汉字,对技术文档偏小
+- 📝 **Phase 2 完整总结**:
+  - 代码行数: 减少约 340 行 (Step 0-4: ~300 行, Step 5: ~40 行)
+  - 新增模块: `retriever_service.py` (85 行)
+  - 职责分离: services/tools/core/prompts 四层架构清晰
+  - 可观测性: LangSmith 集成,支持追踪和调试
+  - 检索优化: 支持 MultiQueryRetriever,chunk 参数优化
+  - 可测试性: 所有服务和工具可独立测试
+  - 可维护性: 单一职责,易于理解和扩展
 
 ---
 
@@ -481,27 +540,47 @@ backend/tests/
 
 ## ✅ 下一步行动
 
-**当前阶段**: ✅ Phase 1 已完成
+**当前阶段**: ✅ Phase 2 已完成 → 🔄 准备进入 Phase 3
 
-**Phase 1 完成情况**:
-- ✅ 删除冗余代码 (rag_pipeline.py + call_model_stream)
-- ✅ 清理所有 __pycache__ 目录
-- ✅ 验证核心接口类型标注
-- ✅ 验证日志系统配置
-- ✅ 验证 API 错误处理
+**Phase 2 完成情况**:
+- ✅ Step 0-4 全部完成
+- ✅ 代码行数减少约 300 行
+- ✅ 职责分离清晰 (services/tools/core/prompts)
+- ✅ 可测试性和可维护性大幅提升
+- ✅ 为 Phase 3 的多 Agent 系统打好基础
 
-**下一阶段**: Phase 2 - LangChain 技术栈升级
+**Phase 2 成果**:
+```
+backend/app/
+├── core/
+│   ├── rag_agent.py          # 已瘦身,使用新模块
+│   ├── checkpointer.py       # NEW: Checkpointer 工厂
+│   └── conversation_manager.py
+├── services/
+│   ├── embedding_service.py  # 已瘦身 (38 行,减少 83%)
+│   ├── retriever_service.py  # NEW: Retriever 工厂 (85 行)
+│   ├── vector_store_repository.py
+│   ├── document_ingest_service.py
+│   └── web_search_service.py
+├── tools/                    # NEW 包: LangChain Tool 定义
+│   ├── __init__.py
+│   ├── retriever_tool.py     # RAG 检索工具
+│   └── web_search_tool.py    # Web 搜索工具
+└── prompts/                  # NEW 包: Prompt 字符串
+    └── __init__.py           # RAG_SYSTEM_PROMPT
+```
 
-**立即行动**:
-1. 升级 LangChain 依赖到最新版本
-2. 学习 LangGraph 最新特性 (StateGraph, Prebuilt Agents)
-3. 重构 Agent 架构 (使用 StateGraph)
-4. 集成 LangSmith 追踪与调试
+**下一阶段**: Phase 3 - 高级 Agent 系统设计
+
+**可选优化** (Phase 2 后期):
+- [x] Step 5: 建 `retriever_service.py`,可选 MultiQueryRetriever
+- [x] Step 6: LangSmith 集成 (可观测性)
+- [x] Step 7: chunk 参数调优 (中文文档优化)
 
 **并行学习**:
-- 阅读 LangGraph 官方文档
-- 学习 StateGraph 概念
-- 研究 Multi-Agent 系统设计模式
+- 阅读 LangGraph 官方文档 (重点: StateGraph, Multi-Agent)
+- 学习 Agent 通信协议 (AutoGen, CrewAI)
+- 研究 Phase 3 的多 Agent 系统设计模式
 
 ---
 

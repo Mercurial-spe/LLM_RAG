@@ -19,120 +19,27 @@ RAG Agent 服务层（重构版）
 """
 
 import logging
-import os
 from typing import Any, Dict, Iterator, List, Optional
 
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
 from langchain.tools import tool
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain.agents.middleware.model_fallback import ModelFallbackMiddleware
 from .. import config
-from ..services.embedding_service import EmbeddingService
+from ..services.retriever_service import build_retriever
 from ..services.web_search_service import WebSearchService
-from ..services.vector_store_repository import VectorStoreRepository
 from .llm_handler import LLMHandler
+from .checkpointer import get_checkpointer
+from ..prompts import RAG_SYSTEM_PROMPT
 
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------- Embeddings 适配器 ----------------------------
-class LCEmbeddingAdapter(Embeddings):
-    """将项目内的 EmbeddingService 适配为 LangChain Embeddings 接口。"""
-
-    def __init__(self, service: EmbeddingService):
-        self._service = service
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self._service.embed_texts(texts)
-
-    def embed_query(self, text: str) -> List[float]:
-        return self._service.embed_text(text)
-
-
 # ---------------------------- 模块级缓存 ----------------------------
-# 只保留 Checkpointer 缓存（真正昂贵且共享的资源）
-_checkpointer = None
-
-
-def _create_retriever_with_filter(session_id: str = "1", top_k: int = None ):
-    """
-    构建一个带 session_id 过滤和动态 K 值的 Retriever（按需创建，不再缓存）。
-    
-    Args:
-        session_id: 当前会话ID，默认 "1"
-        top_k: 检索文档数量，若为 None 则使用配置文件默认值
-        
-    检索范围：
-        - session_id = "system" 的文档（全局系统文档）
-        - session_id = 当前会话ID 的文档（用户上传的文档）
-    """
-    # 使用传入的 top_k，若未指定则使用配置文件默认值
-    if top_k is None:
-        top_k = config.RAG_TOP_K
-    
-    embedding_service = EmbeddingService.get_instance()
-    vector_repo = VectorStoreRepository()
-    lc_embeddings = LCEmbeddingAdapter(embedding_service)
-    
-    # 构建过滤条件：检索 system 文档 + 当前会话文档
-    search_kwargs = {
-        "k": top_k,
-        "filter": {
-            "$or": [
-                {"session_id": "system"},      # 系统全局文档
-                {"session_id": session_id}     # 当前会话文档
-            ]
-        }
-    }
-    
-    logger.info(f"🔨 创建新的 retriever，session_id={session_id}, top_k={top_k}")
-    retriever = vector_repo.as_langchain_retriever(
-        embedding_instance=lc_embeddings,
-        search_type="similarity",
-        search_kwargs=search_kwargs,
-    )
-    
-    return retriever
-
-
-def _get_checkpointer():
-    """构建或返回缓存的 Checkpointer（用于短期记忆持久化）。"""
-    global _checkpointer
-    if _checkpointer is not None:
-        return _checkpointer
-    
-    # 确保目录存在
-    db_dir = os.path.dirname(config.CHAT_MEMORY_DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
-    
-    # 尝试使用 SQLite Checkpointer（需要 langgraph-checkpoint-sqlite）
-    # 如果不可用，降级到 MemorySaver（内存存储）
-    try:
-        try:
-            from langgraph.checkpoint.sqlite import SqliteSaver
-            import sqlite3
-            conn = sqlite3.connect(config.CHAT_MEMORY_DB_PATH, check_same_thread=False)
-            _checkpointer = SqliteSaver(conn)
-            _checkpointer.setup()
-            logger.info(f"使用 SQLite Checkpointer，数据库路径: {config.CHAT_MEMORY_DB_PATH}")
-        except Exception as e:
-            logger.error(
-                "初始化 SqliteSaver 失败，将降级为 MemorySaver。错误: %s: %s",
-                type(e).__name__, str(e), exc_info=True
-            )
-            from langgraph.checkpoint.memory import MemorySaver
-            _checkpointer = MemorySaver()
-            logger.warning("已切换为 MemorySaver（内存存储，重启后丢失）。")
-    except Exception as e:
-        from langgraph.checkpoint.memory import MemorySaver
-        _checkpointer = MemorySaver()
-        logger.warning(f"初始化 Checkpointer 失败: {e}，使用 MemorySaver（内存存储）")
-    
-    return _checkpointer
+# Checkpointer 已移至独立模块 (core/checkpointer.py)
+# Retriever 已移至独立模块 (services/retriever_service.py)
 
 
 def _create_dynamic_agent(
@@ -199,7 +106,7 @@ def _create_dynamic_agent(
                 logger.warning("Skip fallback model %s due to init error: %s", candidate_model, exc)
     
     # --- 3. 获取共享的 Checkpointer ---
-    checkpointer = _get_checkpointer()
+    checkpointer = get_checkpointer()
     
     # --- 4. 创建动态 Summarization Middleware ---
     # 【修正2】使用正确的配置项
@@ -219,9 +126,11 @@ def _create_dynamic_agent(
     )
     
     # --- 5. 创建动态 Retriever ---
-    retriever = _create_retriever_with_filter(
+    # 如果启用 MultiQueryRetriever,传入 LLM 实例
+    retriever = build_retriever(
         session_id=session_id,
-        top_k=effective_top_k
+        top_k=effective_top_k,
+        llm=llm if config.USE_MULTI_QUERY_RETRIEVER else None
     )
     web_search_service = WebSearchService.get_instance()
     search_state: Dict[str, Any] = {
@@ -276,29 +185,7 @@ def _create_dynamic_agent(
         )
         return serialized, docs
 
-    # --- 7. System Prompt ---
-    system_prompt = (
-        "你通过扮演一门计算机网络课程的助教以及一个‘检索优先’的智能体。\n"
-        "工具：`retrieve_context`（返回内部知识库 KB + 网络搜索结果）。当 `use_web_search=True` 时，必须在每一轮回答**之前**先调用一次 `retrieve_context`。\n"
-        "如果用户的查询中包含 web/online/最新/实时/当前/最近/年份 等关键词，必须调用 `retrieve_context` 并引用公开来源。\n"
-        "如果内部知识库 (KB) 与网络搜索结果存在冲突，请明确指出差异（如时间、版本不同），并同时展示这两个视角的观点。\n"
-        "\n"
-        "回答规则：\n"
-        "1) 务必先调用 `retrieve_context`，然后基于检索到的内容进行回答。\n"
-        "2) 如果使用了外部来源，请在回答末尾添加引用模块，格式为——来源：[链接或出处]；内容：[约50字的摘要]。\n"
-        "3) 使用 Markdown 格式（标题、列表）组织内容。如果信息不足，请直接说明，并建议用户进行更多搜索或上传资料。\n"
-        "4) 关于冲突处理：明确标记“内部资料 vs 网络信息”的差异，然后给出一个平衡的观点。\n"
-        "\n"
-        "语气与教学风格：\n"
-        "-以此深入浅出的方式开场，避免一开始就堆砌生涩的术语。\n"
-        "- 针对关键主题（如链路层、路由协议、TCP 拥塞控制、DNS、ARP 等），适时提供额外的具体示例或实验场景。\n"
-        "- 如果学生看起来不确定或有困惑，主动提供辅助选项（如：、更简化的场景类比、或考试风格的练习题）。\n"
-        "- 保持鼓励、支持和乐于助人的态度。\n"
-        "\n"
-        "目标：帮助学生真正理解知识点，并顺利通过课程考试。"
-    )
-
-    # --- 8. 创建 Agent ---
+    # --- 7. 创建 Agent ---
     middleware_stack = [summarization_middleware]
     if fallback_models:
         middleware_stack.append(ModelFallbackMiddleware(*fallback_models))
@@ -306,7 +193,7 @@ def _create_dynamic_agent(
     agent = create_agent(
         llm,
         tools=[retrieve_context_filtered],
-        system_prompt=system_prompt,
+        system_prompt=RAG_SYSTEM_PROMPT,
         checkpointer=checkpointer,
         middleware=middleware_stack,
     )

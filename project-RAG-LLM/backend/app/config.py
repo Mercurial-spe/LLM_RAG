@@ -20,8 +20,9 @@ load_dotenv(PROJECT_ROOT.parent / ".env")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 MODELSCOPE_API_KEY = os.getenv("MODELSCOPE_API_KEY")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
 
-# --- Provider & model selection ---
+# --- 阿里云配置 ---
 LLM_PROVIDER = "dashscope"  # switch provider here (dashscope / ollama)
 LLM_API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 LLM_MODEL_NAME = "qwen3-max"
@@ -48,8 +49,8 @@ OLLAMA_API_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL_NAME = "llama3.2:1b"
 
 # --- Embeddings ---
-DASHSCOPE_API_BASE_URL = LLM_API_BASE_URL
-EMBEDDING_API_BASE_URL = DASHSCOPE_API_BASE_URL
+EMBEDDING_API_KEY=DASHSCOPE_API_KEY
+EMBEDDING_API_BASE_URL = LLM_API_BASE_URL
 EMBEDDING_MODEL_NAME = "text-embedding-v4"
 EMBEDDING_DIMENSION = 1024
 EMBEDDING_BATCH_SIZE = 10
@@ -57,6 +58,7 @@ EMBEDDING_MAX_TOKENS = 8192
 
 # --- RAG / retrieval ---
 RAG_TOP_K = 3
+USE_MULTI_QUERY_RETRIEVER = False  # 是否启用 MultiQueryRetriever (会增加延迟和费用)
 
 # --- Vector store ---
 VECTOR_STORE_TYPE = "chroma"
@@ -84,8 +86,8 @@ TTS_REWRITE_WITH_LLM = True
 
 # --- Document ingest ---
 RAW_DOCUMENTS_PATH = str(PROJECT_ROOT / "data" / "raw_documents")
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = 800  # 优化中文文档:从 500 提升到 800 (中文字符密度高)
+CHUNK_OVERLAP = 150  # 优化上下文连续性:从 50 提升到 150
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
 # --- Flask runtime ---
@@ -104,3 +106,6 @@ TAVILY_API_BASE_URL = "https://api.tavily.com/search"
 TAVILY_MAX_RESULTS = 4
 TAVILY_SEARCH_DEPTH = "basic"
 TAVILY_TIMEOUT = 8.0
+
+# --- LangSmith (可观测性) ---
+LANGSMITH_PROJECT = "RAG-Agent"  # LangSmith 项目名称
