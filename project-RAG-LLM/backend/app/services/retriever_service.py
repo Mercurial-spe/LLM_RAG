@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain_community.retrievers import MultiQueryRetriever
 
 from .vector_store_repository import VectorStoreRepository
 from .embedding_service import get_embeddings

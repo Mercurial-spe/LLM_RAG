@@ -9,7 +9,7 @@ from datetime import datetime
 
 from ..config import PROJECT_ROOT, MAX_UPLOAD_SIZE, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_MODEL_NAME
 from ..services.document_ingest_service import DocumentIngestService
-from ..services.embedding_service import EmbeddingService
+from ..services.embedding_service import get_embeddings
 from ..services.vector_store_repository import VectorStoreRepository
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,10 @@ def upload_document():
     
     file = request.files['file']
     
-    # 【关键】从请求中获取 session_id，默认为 "1"
-    session_id = request.form.get('session_id', '1')
+    # 【关键】session_id 必须显式传入，避免不同会话文档写入同一默认空间
+    session_id = (request.form.get('session_id') or '').strip()
+    if not session_id:
+        return jsonify({"error": "session_id 不能为空"}), 400
     
     # 检查用户是否选择了文件
     if file.filename == '':
@@ -55,6 +57,13 @@ def upload_document():
             "error": f"不支持的文件类型。支持的格式：{', '.join(ALLOWED_EXTENSIONS)}"
         }), 400
     
+    # 基于请求头先做大小校验，避免超大文件先落盘
+    content_length = request.content_length
+    if content_length and content_length > MAX_UPLOAD_SIZE:
+        return jsonify({
+            "error": f"文件大小超过限制 ({MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB)"
+        }), 400
+
     try:
         # 确保上传目录存在
         UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -97,7 +106,7 @@ def upload_document():
                 chunk_overlap=CHUNK_OVERLAP,
                 embedding_model=EMBEDDING_MODEL_NAME
             )
-            embedding_service = EmbeddingService.get_instance()
+            embeddings_client = get_embeddings()
             vector_repo = VectorStoreRepository()
             
             # 2. 处理文档 → chunks（传入 session_id）
@@ -119,7 +128,7 @@ def upload_document():
             
             # 3. 生成向量
             contents = [chunk['content'] for chunk in processed_chunks]
-            embeddings = embedding_service.embed_texts(contents)
+            embeddings = embeddings_client.embed_documents(contents)
             
             # 4. 存入向量数据库
             ids = [chunk['id'] for chunk in processed_chunks]

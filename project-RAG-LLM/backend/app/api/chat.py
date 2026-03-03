@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
-from ..core.rag_agent import stream_messages, invoke
+from ..agents.runtime import get_runtime
 from ..core.conversation_manager import (
     get_all_conversations,
     get_conversation_messages,
@@ -25,6 +25,28 @@ logger = logging.getLogger(__name__)
 chat_bp = Blueprint("chat", __name__)
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_dynamic_config(config_data: dict):
+    """校验前端动态参数，返回错误信息（无错误时返回 None）"""
+    if "temperature" in config_data:
+        temperature = config_data.get("temperature")
+        if not _is_number(temperature):
+            return "temperature 必须是数字"
+        if temperature < 0 or temperature > 2:
+            return "temperature 必须在 0 到 2 之间"
+
+    for field in ["top_k", "messages_to_keep", "max_tokens"]:
+        if field in config_data:
+            value = config_data.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                return f"{field} 必须是大于 0 的整数"
+
+    return None
+
+
 @chat_bp.route("/chat/stream", methods=["POST", "OPTIONS"])
 def chat_message_stream():
     # 处理 OPTIONS 预检请求（仅在启用 CORS 时需要）
@@ -42,7 +64,13 @@ def chat_message_stream():
     
     # 【新增】从前端获取动态配置，并设置默认值
     config_data = data.get("config", {})
-    
+    if not isinstance(config_data, dict):
+        return jsonify({"success": False, "error": "config 必须是对象"}), 400
+
+    config_validation_error = _validate_dynamic_config(config_data)
+    if config_validation_error:
+        return jsonify({"success": False, "error": config_validation_error}), 400
+
     # 从 config.py 导入默认值作为 fallback
     from .. import config as app_config
     
@@ -64,39 +92,55 @@ def chat_message_stream():
         logger.warning("前端请求启用联网搜索，但后端未启用该功能或缺少 Tavily API Key")
     
     # 【调试日志】记录接收到的前端配置
-    logger.info(f"📥 /chat/stream 接收到前端数据:")
-    logger.info(f"   - 前端传递的 config: {config_data}")
-    logger.info(f"   - 最终使用的 dynamic_params: {dynamic_params}")
+    logger.info("/chat/stream 接收到前端数据: config_keys=%s", sorted(config_data.keys()))
+    logger.info(
+        "/chat/stream 最终使用 dynamic_params: temperature=%s, top_k=%s, messages_to_keep=%s, max_tokens=%s, llm_model=%s, web_search_enabled=%s",
+        dynamic_params["temperature"],
+        dynamic_params["top_k"],
+        dynamic_params["messages_to_keep"],
+        dynamic_params["max_tokens"],
+        dynamic_params["llm_model"],
+        use_web_search,
+    )
     
     # 要求前端必须显式传入 session_id，避免不同会话写入同一默认线程
     if not session_id:
         logger.warning("/chat/stream 调用缺少 session_id，拒绝请求以避免写入默认线程")
-        return jsonify({"error": "session_id 不能为空"}), 400
+        return jsonify({"success": False, "error": "session_id 不能为空"}), 400
 
     # 使用 session_id 作为 thread_id（与 LangGraph 的 configurable.thread_id 对齐）
     thread_id = session_id
 
     if not user_message:
-        return jsonify({"error": "message 不能为空"}), 400
+        return jsonify({"success": False, "error": "message 不能为空"}), 400
 
 
     @stream_with_context
     def generate_sse():
         try:
-            # 使用基于 LangChain Agent 的 RAG 流，只推送"模型文本"
-            # 传递 thread_id 以支持短期记忆，传递动态参数
-            for chunk in stream_messages(
+            # 创建 AgentRuntime 实例（传递动态参数）
+            runtime = get_runtime(
+                session_id=thread_id,
+                temperature=dynamic_params["temperature"],
+                top_k=dynamic_params["top_k"],
+                messages_to_keep=dynamic_params["messages_to_keep"],
+                max_tokens=dynamic_params["max_tokens"],
+                use_web_search=use_web_search,
+                llm_model=dynamic_params["llm_model"],
+            )
+
+            # 使用新的 AgentRuntime 流式输出
+            for chunk in runtime.stream_messages(
                 user_message,
                 thread_id=thread_id,
-                use_web_search=use_web_search,
-                **dynamic_params  # 将所有动态参数解包传入
             ):
                 # 使用 JSON 编码保留换行符，避免与 SSE 的 \n\n 冲突
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             yield "event: done\n"
         except Exception as e:
+            logger.error("/chat/stream SSE 处理失败: %s", e, exc_info=True)
             yield "event: error\n"
-            yield f"data: {json.dumps(str(e), ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps('服务内部错误', ensure_ascii=False)}\n\n"
 
     # 注意：SSE 必须保持文本流类型，并设置正确的响应头
     response = Response(generate_sse(), mimetype="text/event-stream")
@@ -139,7 +183,15 @@ def chat_voice():
         try:
             config_data = json.loads(config_raw)
         except json.JSONDecodeError:
-            logger.warning("语音接口 config 字段解析失败，原始值: %s", config_raw)
+            logger.warning("语音接口 config 字段解析失败")
+            return jsonify({"success": False, "error": "config 必须是合法 JSON"}), 400
+
+    if not isinstance(config_data, dict):
+        return jsonify({"success": False, "error": "config 必须是对象"}), 400
+
+    config_validation_error = _validate_dynamic_config(config_data)
+    if config_validation_error:
+        return jsonify({"success": False, "error": config_validation_error}), 400
 
     from .. import config as app_config
     requested_llm_model = config_data.get("llm_model")
@@ -170,15 +222,21 @@ def chat_voice():
     reply_text = ""
     if not transcribe_only:
         try:
-            reply_text = invoke(
-                transcript,
-                thread_id=session_id,
+            # 创建 AgentRuntime 实例（传递动态参数）
+            runtime = get_runtime(
+                session_id=session_id,
                 temperature=dynamic_params["temperature"],
                 top_k=dynamic_params["top_k"],
                 messages_to_keep=dynamic_params["messages_to_keep"],
                 max_tokens=dynamic_params["max_tokens"],
                 use_web_search=voice_web_search,
                 llm_model=dynamic_params["llm_model"],
+            )
+
+            # 使用新的 AgentRuntime 调用
+            reply_text = runtime.invoke(
+                transcript,
+                thread_id=session_id,
             )
         except Exception as exc:  # pragma: no cover
             logger.error("语音问答失败: %s", exc, exc_info=True)
